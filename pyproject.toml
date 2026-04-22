@@ -19,13 +19,13 @@ backend = [
     "djangorestframework>=3.16.1",
     "djangorestframework-simplejwt>=5.5.1",
     "djangorestframework-stubs>=3.16.8",
-    "gunicorn>=23.0.0",
     "psycopg[binary]>=3.3.2",
     "adrf>=0.1.12",
     "asyncpg>=0.31.0",
     "daphne>=4.2.1",
     "drf-spectacular>=0.29.0",
     "django-unfold>=0.86.1",
+    "twisted[http2,tls]>=25.5.0",
 ]
 
 bot = [

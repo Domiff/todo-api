@@ -28,7 +28,13 @@ SECRET_KEY = settings.DJANGO_SECRET_KEY
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = settings.DJANGO_DEBUG
 
-ALLOWED_HOSTS = ["127.0.0.1", "0.0.0.0", "backend"]
+ALLOWED_HOSTS = [
+    "127.0.0.1",
+    "localhost",
+    "0.0.0.0",
+    "backend",
+    "todo.com",
+]
 
 
 # Application definition
@@ -139,6 +145,7 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/6.0/howto/static-files/
 
 STATIC_URL = "static/"
+STATIC_ROOT = "static/"
 
 
 REST_FRAMEWORK = {
@@ -214,4 +221,20 @@ LOGGING = {
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
+    "https://domiff-todo-frontend-e71f.twc1.net",
 ]
+
+CSRF_TRUSTED_ORIGINS = [
+    "https://localhost",
+    "https://127.0.0.1",
+    "https://todo.com",
+]
+
+CSRF_COOKIE_SECURE = True
+SESSION_COOKIE_SECURE = True
+SECURE_SSL_REDIRECT = True
+
+SECURE_HSTS_SECONDS = 31536000
+SECURE_HSTS_PRELOAD = True
+SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")

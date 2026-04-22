@@ -22,6 +22,9 @@ ENV PYTHONUNBUFFERED=1 \
 
 COPY --from=builder /usr/local /usr/local
 
+COPY ../wait-for-it.sh /wait-for-it.sh
+RUN chmod +x /wait-for-it.sh
+
 COPY backend /backend
 
 CMD ["daphne", "-b", "0.0.0.0", "-p", "8000", "todo_manager.asgi:application"]
