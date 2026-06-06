@@ -1,7 +1,7 @@
 services:
   promtail:
     image: grafana/promtail:latest
-    container_name: promtail
+    container_name: todo-api-promtail
     ports:
       - "9080:9080"
     volumes:
@@ -13,7 +13,7 @@ services:
 
   loki:
     image: grafana/loki:latest
-    container_name: loki
+    container_name: todo-api-loki
     ports:
       - "3100:3100"
     volumes:
@@ -21,7 +21,7 @@ services:
 
   grafana:
     image: grafana/grafana:latest
-    container_name: grafana
+    container_name: todo-api-grafana
     ports:
       - "3000:3000"
     environment:
@@ -32,9 +32,9 @@ services:
       - grafana_data:/var/lib/grafana
 
   backend:
-    container_name: backend
+    container_name: todo-api-backend
     build:
-      dockerfile: backend/Dockerfile
+      dockerfile: Dockerfile
     env_file:
       .env.django
     command:
@@ -50,28 +50,6 @@ services:
     depends_on:
       - pg
 
-  redis:
-    container_name: redis
-    image: redis:8-alpine
-    volumes:
-      - ./redis_data:/data
-
-  bot:
-    container_name: bot
-    build:
-      context: .
-      dockerfile: bot/Dockerfile
-    env_file:
-      - .env.bot
-    command:
-      - "python"
-      - "-m"
-      - "bot.main"
-    depends_on:
-      - redis
-    ports:
-      - "8080:8080"
-
   pg:
     container_name: pg
     image: postgres:16
@@ -85,7 +63,7 @@ services:
 
   nginx:
     image: nginx:1.28
-    container_name: nginx
+    container_name: todo-api-nginx
     restart: unless-stopped
     ports:
       - "8080:80"
@@ -100,5 +78,9 @@ services:
 
 volumes:
   pg_data:
-  redis_data:
   grafana_data:
+
+networks:
+  default:
+    external: true
+    name: todo-network

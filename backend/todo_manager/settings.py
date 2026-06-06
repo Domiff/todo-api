@@ -28,13 +28,7 @@ SECRET_KEY = settings.DJANGO_SECRET_KEY
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = settings.DJANGO_DEBUG
 
-ALLOWED_HOSTS = [
-    "127.0.0.1",
-    "localhost",
-    "0.0.0.0",
-    "backend",
-    "todo.com",
-]
+ALLOWED_HOSTS = settings.ALLOWED_HOSTS
 
 
 # Application definition
@@ -221,13 +215,11 @@ LOGGING = {
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
-    "https://domiff-todo-frontend-e71f.twc1.net",
 ]
 
 CSRF_TRUSTED_ORIGINS = [
     "https://localhost",
     "https://127.0.0.1",
-    "https://todo.com",
 ]
 
 CSRF_COOKIE_SECURE = True

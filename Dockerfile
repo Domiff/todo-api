@@ -3,13 +3,13 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
 WORKDIR /backend
 
-COPY ../pyproject.toml ./
+COPY pyproject.toml ./
 
 ENV UV_PROJECT_ENVIRONMENT=/usr/local
 
 ENV UV_SYSTEM_PYTHON=1
 
-RUN uv sync --group backend
+RUN uv sync --no-dev
 
 
 FROM python:3.13-slim-trixie
@@ -22,7 +22,7 @@ ENV PYTHONUNBUFFERED=1 \
 
 COPY --from=builder /usr/local /usr/local
 
-COPY ../wait-for-it.sh /wait-for-it.sh
+COPY wait-for-it.sh /wait-for-it.sh
 RUN chmod +x /wait-for-it.sh
 
 COPY backend /backend

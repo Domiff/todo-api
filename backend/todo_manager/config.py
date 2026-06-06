@@ -4,6 +4,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     DJANGO_SECRET_KEY: str
     DJANGO_DEBUG: bool
+    ALLOWED_HOSTS: list[str]
 
     POSTGRES_DB: str
     POSTGRES_USER: str
