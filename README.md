@@ -75,7 +75,7 @@ with categories, deadlines, and completion status.
 
 Create an env file at the **repository root** (it is gitignored; do not commit secrets):
 
-### `.env.django`
+### `.env`
 
 | Variable                                            | Purpose                                                                      |
 |-----------------------------------------------------|------------------------------------------------------------------------------|
@@ -92,7 +92,7 @@ Create an env file at the **repository root** (it is gitignored; do not commit s
    uv sync
    ```
 
-2. Create `.env.django` at the repo root with at minimum:
+2. Create `.env` at the repo root with at minimum:
    ```env
    DJANGO_SECRET_KEY=your-secret-key
    DJANGO_DEBUG=True
@@ -133,7 +133,7 @@ Typical ports:
 | Loki             | 3100       | Log aggregation                                                             |
 | Promtail         | 9080       | Log shipping                                                                |
 
-Ensure `.env.django` sets `POSTGRES_HOST=pg`.
+Ensure `.env` sets `POSTGRES_HOST=pg`.
 
 All services run on the external Docker network **`todo-network`** — create it once before the first start:
 

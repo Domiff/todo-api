@@ -36,7 +36,7 @@ services:
     build:
       dockerfile: Dockerfile
     env_file:
-      .env.django
+      .env
     command:
       - /wait-for-it.sh
       - pg:5432
@@ -54,7 +54,7 @@ services:
     container_name: pg
     image: postgres:16
     env_file:
-      - .env.django
+      - .env
     ports:
       - "5432:5432"
     volumes:

@@ -1,4 +1,4 @@
-set dotenv-filename := ".env.django"
+set dotenv-filename := ".env"
 
 install:
     uv sync --group dev
