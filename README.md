@@ -58,6 +58,7 @@ with categories, deadlines, and completion status.
 ├── nginx/
 │   └── todo.conf                     # Nginx virtual host (proxy_pass → Unix socket)
 ├── Dockerfile
+├── Justfile
 ├── wait-for-it.sh
 ├── docker-compose.yml
 ├── pyproject.toml                    # uv dependency groups: backend, dev
