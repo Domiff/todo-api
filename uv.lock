@@ -913,6 +913,7 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "django-stubs" },
     { name = "pre-commit" },
     { name = "ruff" },
 ]
@@ -936,6 +937,7 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "django-stubs", specifier = ">=5.2.9" },
     { name = "pre-commit", specifier = ">=4.5.1" },
     { name = "ruff", specifier = ">=0.14.9" },
 ]
