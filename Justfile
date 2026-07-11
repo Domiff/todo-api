@@ -7,7 +7,7 @@ run:
     cd backend && uv run python manage.py runserver
 
 run-asgi:
-    cd backend && uv run daphne todo_manager.asgi:application
+    cd backend && uv run daphne core.asgi:application
 
 migrate:
     cd backend && uv run python manage.py migrate

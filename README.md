@@ -30,10 +30,9 @@ with categories, deadlines, and completion status.
 .
 ├── backend/
 │   ├── manage.py
-│   ├── todo_manager/                 # Django project (settings, routing, ASGI)
+│   ├── core/                         # Django project (settings, routing, ASGI)
 │   │   ├── asgi.py
-│   │   ├── config.py                 # env-driven settings (pydantic)
-│   │   ├── settings.py
+│   │   ├── settings/                 # split settings (env, apps, base, database, ...)
 │   │   ├── urls.py                   # mounts /api/, /auth/, /admin/, /schema/
 │   │   └── wsgi.py
 │   ├── todo/                         # Tasks & categories

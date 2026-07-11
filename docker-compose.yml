@@ -44,7 +44,7 @@ services:
       - daphne
       - -u
       - /tmp/daphne.sock
-      - todo_manager.asgi:application
+      - core.asgi:application
     volumes:
       - ./tmp:/tmp
     depends_on:
