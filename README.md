@@ -37,7 +37,7 @@ with categories, deadlines, and completion status.
 │   │   └── wsgi.py
 │   ├── todo/                         # Tasks & categories
 │   │   ├── migrations/
-│   │   ├── serializers/
+│   │   ├── serializers.py
 │   │   ├── models.py
 │   │   ├── urls.py
 │   │   ├── utils.py
