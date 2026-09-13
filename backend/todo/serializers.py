@@ -1,8 +1,14 @@
 from adrf.serializers import ModelSerializer
-from rest_framework.fields import CurrentUserDefault, HiddenField
+from rest_framework.fields import HiddenField, CurrentUserDefault
 from rest_framework.relations import SlugRelatedField
 
-from ..models import Category, Task
+from backend.todo.models import Category, Task
+
+
+class CategorySerializer(ModelSerializer):
+    class Meta:
+        model = Category
+        fields = "urgency"
 
 
 class TaskBaseSerializer(ModelSerializer):
