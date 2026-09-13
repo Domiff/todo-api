@@ -1,7 +1,7 @@
 from django.contrib import admin
 from unfold.admin import ModelAdmin
 
-from .models import Category, Task
+from todo.models import Category, Task
 
 
 @admin.register(Category)

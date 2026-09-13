@@ -1,7 +1,7 @@
 from django.contrib import admin
 from unfold.admin import ModelAdmin
 
-from .models import TgProfile, WebProfile
+from auth_user.models import TgProfile, WebProfile
 
 base_list_display = ["user", "username", "first_name", "last_name"]
 

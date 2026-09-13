@@ -6,14 +6,14 @@ from adrf.generics import (
     UpdateAPIView,
 )
 
-from .models import Task
-from .serializers import (
+from todo.models import Task
+from todo.serializers import (
     TaskCreateSerializer,
     TaskDetailSerializer,
     TaskListSerializer,
     TaskUpdateSerializer,
 )
-from .utils import get_valid_task_or_404
+from todo.utils import get_valid_task_or_404
 
 
 class TodoListView(ListAPIView):

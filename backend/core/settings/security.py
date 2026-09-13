@@ -3,7 +3,7 @@ Security settings (CSRF, cookies, HTTPS).
 https://docs.djangoproject.com/en/6.0/topics/security/
 """
 
-from .env import env
+from core.settings.env import env
 
 CSRF_TRUSTED_ORIGINS = env("CSRF_TRUSTED_ORIGINS")
 

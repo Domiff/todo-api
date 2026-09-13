@@ -5,7 +5,7 @@ from rest_framework_simplejwt.views import (
     TokenRefreshView,
 )
 
-from .views import TgRegisterAPIView, WebRegisterAPIView
+from auth_user.views import TgRegisterAPIView, WebRegisterAPIView
 
 app_name = "auth_user"
 

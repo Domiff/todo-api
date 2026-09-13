@@ -1,6 +1,6 @@
 from django.http import Http404
 
-from .models import Task
+from todo.models import Task
 
 
 async def get_valid_task_or_404(user, pk):

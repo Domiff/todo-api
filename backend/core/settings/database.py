@@ -3,8 +3,8 @@ Database settings.
 https://docs.djangoproject.com/en/6.0/ref/settings/#databases
 """
 
-from .base import DEBUG
-from .env import BASE_DIR, env
+from core.settings.base import DEBUG
+from core.settings.env import BASE_DIR, env
 
 if DEBUG:
     DATABASES = {

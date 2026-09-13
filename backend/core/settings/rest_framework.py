@@ -6,7 +6,7 @@ https://django-rest-framework-simplejwt.readthedocs.io/en/latest/settings.html
 
 from datetime import timedelta
 
-from .base import SECRET_KEY
+from core.settings.base import SECRET_KEY
 
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": (
