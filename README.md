@@ -5,7 +5,7 @@ with categories, deadlines, and completion status.
 
 ## Features
 
-- **Tasks**: create, list, update, delete; optional filtering and detail by id.
+- **Tasks**: full CRUD through a single viewset; each user sees only their own tasks.
 - **Categories**: urgency-based categories linked to tasks.
 - **Auth**: Simple JWT (access/refresh, blacklist on rotation); separate registration flows for Telegram and web profiles.
 - **API docs**: OpenAPI schema and **Swagger UI** (drf-spectacular).
@@ -39,9 +39,8 @@ with categories, deadlines, and completion status.
 │   │   ├── migrations/
 │   │   ├── serializers.py
 │   │   ├── models.py
-│   │   ├── urls.py
-│   │   ├── utils.py
-│   │   └── views.py                  # async list/detail CRUD (adrf)
+│   │   ├── urls.py                   # router: tasks/
+│   │   └── views.py                  # TaskViewSet (adrf ModelViewSet)
 │   └── auth_user/                    # Registration & JWT-facing views
 │       ├── migrations/
 │       ├── admin.py
@@ -146,8 +145,10 @@ Base URL prefix: `/api/` for tasks, `/auth/` for registration and tokens.
 
 | Area  | Example paths                                                                                                                                 |
 | ----- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| Tasks | `GET api/list/`, `GET api/list/<id>`, `POST api/create/`, `PUT/PATCH api/update/<id>`, `DELETE api/delete/<id>`                               |
+| Tasks | `GET api/tasks/`, `POST api/tasks/`, `GET api/tasks/<id>`, `PUT/PATCH api/tasks/<id>`, `DELETE api/tasks/<id>`                                |
 | Auth  | `POST auth/tg/register/`, `POST auth/web/register/`, `POST auth/token/`, `POST auth/token/refresh/`, `POST auth/token/blacklist/`             |
+
+The trailing slash on task routes is optional: `api/tasks/5` and `api/tasks/5/` both work.
 
 Interactive documentation:
 
