@@ -8,10 +8,10 @@ from todo.models import Category, Task
 class CategorySerializer(ModelSerializer):
     class Meta:
         model = Category
-        fields = "urgency"
+        fields = ("urgency",)
 
 
-class TaskBaseSerializer(ModelSerializer):
+class TaskSerializer(ModelSerializer):
     category = SlugRelatedField(
         slug_field="urgency",
         queryset=Category.objects.all(),
@@ -21,39 +21,13 @@ class TaskBaseSerializer(ModelSerializer):
     class Meta:
         model = Task
         fields = (
+            "pk",
             "creator",
             "title",
+            "body",
             "deadline",
             "category",
-        )
-
-
-class TaskListSerializer(TaskBaseSerializer):
-    class Meta(TaskBaseSerializer.Meta):
-        fields = TaskBaseSerializer.Meta.fields + (
-            "pk",
-            "body",
-            "completed",
-            "created_at",
-        )
-
-
-class TaskDetailSerializer(TaskBaseSerializer):
-    class Meta(TaskBaseSerializer.Meta):
-        fields = TaskBaseSerializer.Meta.fields + (
-            "pk",
-            "body",
             "completed",
             "created_at",
             "updated_at",
         )
-
-
-class TaskCreateSerializer(TaskBaseSerializer):
-    class Meta(TaskBaseSerializer.Meta):
-        fields = TaskBaseSerializer.Meta.fields + ("body",)
-
-
-class TaskUpdateSerializer(TaskBaseSerializer):
-    class Meta(TaskBaseSerializer.Meta):
-        fields = TaskBaseSerializer.Meta.fields + ("body", "deadline", "completed", "pk")
