@@ -37,14 +37,9 @@ services:
       dockerfile: Dockerfile
     env_file:
       .env
-    command:
-      - /wait-for-it.sh
-      - pg:5432
-      - --
-      - daphne
-      - -u
-      - /tmp/daphne.sock
-      - core.asgi:application
+    ports:
+      - "8000:8000"
+    command: daphne -b 0.0.0.0 -p 8000 core.asgi:application
     volumes:
       - ./tmp:/tmp
     depends_on:
