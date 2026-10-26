@@ -16,6 +16,7 @@ dependencies = [
     "django-unfold>=0.86.1",
     "twisted[http2,tls]>=25.5.0",
     "django-environ>=0.14.0",
+    "aio-pika>=10.2.1",
 ]
 
 [dependency-groups]
