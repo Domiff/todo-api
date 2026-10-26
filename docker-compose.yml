@@ -43,7 +43,10 @@ services:
     volumes:
       - ./tmp:/tmp
     depends_on:
-      - pg
+      pg:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
 
   pg:
     container_name: pg
@@ -54,7 +57,13 @@ services:
       - "5432:5432"
     volumes:
       - pg_data:/var/lib/postgresql/data
-    restart: always
+    healthcheck:
+          test: [ "CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}" ]
+          start_period: 5s
+          interval: 1m
+          timeout: 3s
+          retries: 5
+    restart: unless-stopped
 
   nginx:
     image: nginx:1.28
@@ -71,9 +80,31 @@ services:
     depends_on:
       - backend
 
+  rabbitmq:
+      container_name: todo-api-rabbitmq
+      image: rabbitmq:4-management
+      env_file:
+        - .env
+      environment:
+        RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER}
+        RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD}
+      ports:
+        - "5672:5672"
+        - "15672:15672"
+      volumes:
+        - rabbitmq_data:/var/lib/rabbitmq
+      healthcheck:
+        test: [ "CMD", "rabbitmq-diagnostics", "-q", "ping" ]
+        start_period: 20s
+        interval: 1m
+        timeout: 5s
+        retries: 5
+      restart: unless-stopped
+    
 volumes:
   pg_data:
   grafana_data:
+  rabbitmq_data:
 
 networks:
   default:
