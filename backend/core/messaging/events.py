@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID, uuid4
 
-from core.messaging.utils import validate_dict
+from core.messaging.utils import to_json_value
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -20,5 +20,5 @@ class Event:
 
     def to_bytes(self) -> bytes:
         return json.dumps(
-            asdict(self), default=validate_dict
+            asdict(self), default=to_json_value
         ).encode()

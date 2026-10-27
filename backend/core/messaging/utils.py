@@ -2,7 +2,7 @@ from datetime import datetime
 from uuid import UUID
 
 
-def validate_dict(value: object):
+def to_json_value(value: object):
     if isinstance(value, UUID):
         return str(value)
     if isinstance(value, datetime):
