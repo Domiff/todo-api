@@ -15,7 +15,6 @@ env = environ.Env(
     DJANGO_SECRET_KEY=(str, ""),
     ALLOWED_HOSTS=(list, []),
     CORS_ALLOWED_ORIGINS=(list, []),
-
     CSRF_TRUSTED_ORIGINS=(list, []),
     CSRF_COOKIE_SECURE=(bool, True),
     SESSION_COOKIE_SECURE=(bool, True),
@@ -23,12 +22,15 @@ env = environ.Env(
     SECURE_HSTS_SECONDS=(int, 31536000),
     SECURE_HSTS_PRELOAD=(bool, True),
     SECURE_HSTS_INCLUDE_SUBDOMAINS=(bool, True),
-
     POSTGRES_DB=(str, ""),
     POSTGRES_USER=(str, ""),
     POSTGRES_PASSWORD=(str, ""),
     POSTGRES_HOST=(str, ""),
     POSTGRES_PORT=(int, 5432),
+    RABBITMQ_USER=(str),
+    RABBITMQ_PASSWORD=(str),
+    RABBITMQ_HOST=(str),
+    RABBITMQ_PORT=(int),
 )
 
 environ.Env.read_env(BASE_DIR.parent / ".env")
