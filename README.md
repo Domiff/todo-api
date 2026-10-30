@@ -9,7 +9,7 @@ with categories, deadlines, and completion status.
 - **Categories**: urgency-based categories linked to tasks.
 - **Auth**: Simple JWT (access/refresh, blacklist on rotation); separate registration flows for Telegram and web profiles.
 - **API docs**: OpenAPI schema and **Swagger UI** (drf-spectacular).
-- **Task events**: creating a task publishes a `todo.task.created.v1` event to RabbitMQ; the
+- **Task events**: creating, updating or deleting a task publishes an event to RabbitMQ; the
   [todo-bot](https://github.com/Domiff/todo-bot) service consumes it and notifies the owner in Telegram.
 
 ## Tech stack
@@ -18,11 +18,10 @@ with categories, deadlines, and completion status.
 |----------------|--------------------------------------------------------------------|
 | API            | Django 6, Django REST Framework, async views (adrf), Daphne (ASGI) |
 | Auth           | djangorestframework-simplejwt                                      |
-| Database       | PostgreSQL (Docker / production-style); SQLite when `DEBUG=True`   |
+| Database       | PostgreSQL; SQLite when `DEBUG=True`                               |
 | Messaging      | RabbitMQ (aio-pika), events in CloudEvents 1.0 JSON format         |
-| Proxy          | Nginx (reverse proxy, SSL, static files)                           |
 | Tooling        | uv, Ruff, pre-commit                                               |
-| Infrastructure | Docker Compose: Grafana, Loki, Promtail (logs/metrics plumbing)    |
+| Infrastructure | Postgres, RabbitMQ and logging live in [todo-infrastructure](#infrastructure) |
 
 
 ## Application structure
@@ -35,10 +34,10 @@ with categories, deadlines, and completion status.
 │   ├── manage.py
 │   ├── core/                         # Django project (settings, routing, ASGI)
 │   │   ├── asgi.py
-│   │   ├── messaging/                # RabbitMQ infrastructure shared by all apps
+│   │   ├── messaging/                # RabbitMQ client code shared by all apps
 │   │   │   ├── connection.py         # one robust connection + channel per process
 │   │   │   ├── events.py             # Event: CloudEvents envelope, serialized to JSON
-│   │   │   ├── topology.py           # exchanges declared by this service
+│   │   │   ├── topology.py           # names of exchanges this service publishes to
 │   │   │   └── utils.py              # JSON serialization helpers
 │   │   ├── settings/                 # split settings (env, apps, base, database, rabbitmq, ...)
 │   │   ├── urls.py                   # mounts /api/, /auth/, /admin/, /schema/
@@ -59,16 +58,10 @@ with categories, deadlines, and completion status.
 │       ├── urls.py
 │       └── views.py
 │
-├── grafana/                          # Datasource provisioning + Loki/Promtail configs
-│   ├── datasources.yml
-│   ├── loki-config.yml
-│   └── promtail-config.yml
-├── nginx/
-│   └── todo.conf                     # Nginx virtual host (proxy_pass → Unix socket)
 ├── Dockerfile
 ├── Justfile
 ├── wait-for-it.sh
-├── docker-compose.yml
+├── docker-compose.yml                # backend only; infrastructure is in todo-infrastructure
 ├── pyproject.toml                    # uv dependency groups: backend, dev
 └── uv.lock
 ```
@@ -77,7 +70,7 @@ with categories, deadlines, and completion status.
 
 - **Python 3.13+**
 - **[uv](https://docs.astral.sh/uv/)** (recommended) for installs and scripts
-- **Docker** / Docker Compose for the full stack (Postgres, Nginx, backend, optional observability)
+- **Docker** / Docker Compose and a running [todo-infrastructure](#infrastructure) stack
 
 ## Configuration
 
@@ -88,12 +81,12 @@ Create an env file at the **repository root** (it is gitignored; do not commit s
 | Variable                                            | Purpose                                                                      |
 |-----------------------------------------------------|------------------------------------------------------------------------------|
 | `DJANGO_SECRET_KEY`                                 | Django secret                                                                |
-| `DJANGO_DEBUG`                                      | `True` for local dev; `False` for production                                 |
-| `ALLOWED_HOSTS`                                     | Comma-separated list of allowed hosts (e.g. `localhost,127.0.0.1`)           |
-| `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD` | Postgres credentials                                                         |
-| `POSTGRES_HOST`, `POSTGRES_PORT`                    | e.g. `pg` and `5432` in Compose; `127.0.0.1` when Postgres runs on the host |
-| `RABBITMQ_USER`, `RABBITMQ_PASSWORD`                | RabbitMQ credentials (required)                                              |
-| `RABBITMQ_HOST`, `RABBITMQ_PORT`                    | e.g. `todo-bot-rabbitmq` and `5672` in Compose (see [Messaging](#messaging)) |
+| `DJANGO_DEBUG`                                      | `True` → SQLite (local dev); `False` → Postgres (Docker, production)         |
+| `ALLOWED_HOSTS`                                     | Comma-separated list of allowed hosts (e.g. `localhost,127.0.0.1,backend`)   |
+| `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD` | Same credentials as in todo-infrastructure's `.env`                          |
+| `POSTGRES_HOST`, `POSTGRES_PORT`                    | `todo-pg` and `5432` in Docker; `127.0.0.1` when running on the host         |
+| `RABBITMQ_USER`, `RABBITMQ_PASSWORD`                | Same credentials as in todo-infrastructure's `.env` (required)               |
+| `RABBITMQ_HOST`, `RABBITMQ_PORT`                    | `todo-rabbitmq` and `5672` in Docker; `127.0.0.1` when running on the host   |
 
 ## Local development (without Docker)
 
@@ -126,47 +119,62 @@ Create an env file at the **repository root** (it is gitignored; do not commit s
    just run-asgi
    ```
 
+## Infrastructure
+
+Postgres, RabbitMQ, Redis and logging (Grafana, Loki, Promtail) are not part of this repository.
+They run in the separate **todo-infrastructure** stack, and this service connects to it over the
+external Docker network **`todo-network`**.
+
+Start order: **todo-infrastructure → todo-api → todo-bot**. This compose file has no `depends_on`
+on Postgres or RabbitMQ (Compose cannot depend on another project), so the infrastructure must be
+up and healthy before the backend starts.
+
 ## Docker Compose
 
-From the repository root:
+1. Start todo-infrastructure (it also expects the `todo-network` network, see its README).
 
-```bash
-docker compose up --build
-```
+2. In this repository set `DJANGO_DEBUG=False` in `.env` so the backend uses Postgres
+   (`POSTGRES_HOST=todo-pg`). With `DEBUG=True` it uses SQLite **inside the container**, and the
+   data is lost every time the container is recreated.
 
-Typical ports:
+3. Build and start the backend:
 
-| Service          | Port       | Notes                                                                       |
-|------------------|------------|-----------------------------------------------------------------------------|
-| Nginx            | 8080 / 443 | HTTP and HTTPS entry point; proxies to Daphne via Unix socket               |
-| Backend (Daphne) | (internal) | Communicates with Nginx via `/tmp/daphne.sock`                              |
-| Postgres         | 5432       | Persisted volume `pg_data`                                                  |
-| RabbitMQ         | 5672 / 15672 | AMQP / management UI; currently unused, events go to `todo-bot-rabbitmq`  |
-| Grafana          | 3000       | Default admin user/password in `docker-compose.yml` (change for production) |
-| Loki             | 3100       | Log aggregation                                                             |
-| Promtail         | 9080       | Log shipping                                                                |
+   ```bash
+   docker compose up -d --build
+   ```
 
-Ensure `.env` sets `POSTGRES_HOST=pg`.
+4. Apply migrations and create an admin user:
 
-All services run on the external Docker network **`todo-network`** — create it once before the first start:
+   ```bash
+   docker compose exec backend python manage.py migrate
+   docker compose exec backend python manage.py createsuperuser
+   ```
 
-```bash
-docker network create todo-network
-```
+| Service          | Container      | Port | Notes                                                   |
+|------------------|----------------|------|---------------------------------------------------------|
+| Backend (Daphne) | `todo-backend` | 8000 | Reachable as `backend:8000` from other services in `todo-network` |
+
+There is no reverse proxy in front of Daphne, and Daphne does not serve static files: with
+`DEBUG=False` the admin and Swagger UI load without styles.
 
 ## Messaging
 
 The API publishes domain events to RabbitMQ so other services can react without calling the API.
 
-- **Broker**: the RabbitMQ instance from the todo-bot stack (`todo-bot-rabbitmq`), reached over
-  `todo-network`. Start todo-bot before creating tasks, otherwise publishing fails.
-- **Exchange**: `todo.tasks` (`direct`, durable), declared by this service on connect.
-  Queues and bindings belong to consumers.
-- **Events**:
+- **Broker**: `todo-rabbitmq` from todo-infrastructure. The connection is opened lazily on the
+  first publish, so the backend starts even if the broker is down, but publishing then fails.
+- **Exchange**: `todo.tasks` (topic, durable). The exchange, queues and bindings are declared by
+  todo-infrastructure (`definitions.json`); this service only publishes.
+- **Events** (published only for users with a Telegram profile):
 
-  | Routing key     | Event type             | Published when                                        |
-  |-----------------|------------------------|-------------------------------------------------------|
-  | `tasks.created` | `todo.task.created.v1` | a task is created by a user with a Telegram profile  |
+  | Routing key     | Event type             | Published when                  | `data`                                                                 |
+  |-----------------|------------------------|---------------------------------|------------------------------------------------------------------------|
+  | `tasks.created` | `todo.task.created.v1` | a task is created               | `task_id`, `tg_id`, `title`, `deadline`                                |
+  | `tasks.updated` | `todo.task.updated.v1` | a task is updated (PUT / PATCH) | `task_id`, `tg_id`, `title`, `body`, `completed`, `deadline`, `category` |
+  | `tasks.deleted` | `todo.task.deleted.v1` | a task is deleted               | `task_id`, `tg_id`, `title`                                            |
+
+  `category` is the category's `urgency` slug; `completed` is a boolean. Event types live in
+  `todo/events.py`, routing keys in `todo/producers.py` (`TaskRoutingKey`).
 
 - **Format**: [CloudEvents 1.0](https://cloudevents.io/) JSON, persistent delivery:
 
@@ -188,8 +196,9 @@ The API publishes domain events to RabbitMQ so other services can react without 
   }
   ```
 
-The event type and payload are a contract with consumers: add optional fields freely, but publish
-a new version (`...v2`) for breaking changes.
+The event type and payload are a contract with consumers: todo-bot keeps its own copy of the
+payload models with all fields required. Messages already waiting in the queue keep the format
+they were published with. Breaking changes are meant to get a new event version (`...v2`).
 
 ## API overview
 
