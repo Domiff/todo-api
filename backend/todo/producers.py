@@ -9,6 +9,8 @@ from core.messaging.topology import TASKS_EXCHANGE
 
 class TaskRoutingKey(StrEnum):
     CREATED = "tasks.created"
+    UPDATED = "tasks.updated"
+    DELETED = "tasks.deleted"
 
 
 async def publish(event: Event, routing_key: TaskRoutingKey) -> None:
