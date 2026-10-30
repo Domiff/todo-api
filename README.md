@@ -60,7 +60,6 @@ with categories, deadlines, and completion status.
 │
 ├── Dockerfile
 ├── Justfile
-├── wait-for-it.sh
 ├── docker-compose.yml                # backend only; infrastructure is in todo-infrastructure
 ├── pyproject.toml                    # uv dependency groups: backend, dev
 └── uv.lock
