@@ -10,6 +10,7 @@ from todo.models import Category, Task
 
 TASKS_URL = "/api/tasks/"
 
+
 def task_url(pk):
     return f"{TASKS_URL}{pk}/"
 

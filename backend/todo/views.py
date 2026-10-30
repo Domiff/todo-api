@@ -88,4 +88,3 @@ class TaskViewSet(ModelViewSet):
             ),
         )
         await publish(event=event, routing_key=TaskRoutingKey.DELETED)
-    

@@ -19,6 +19,4 @@ class Event:
     data: Any
 
     def to_bytes(self) -> bytes:
-        return json.dumps(
-            asdict(self), default=to_json_value
-        ).encode()
+        return json.dumps(asdict(self), default=to_json_value).encode()
