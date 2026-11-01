@@ -6,6 +6,7 @@ from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APITestCase
 
+from auth_user.models import Profile
 from todo.models import Category, Task
 
 TASKS_URL = "/api/tasks/"
@@ -23,6 +24,8 @@ class TaskAPITestCase(APITestCase):
     def setUpTestData(cls):
         cls.user = User.objects.create_user(username="owner", password="pass")
         cls.other_user = User.objects.create_user(username="stranger", password="pass")
+        cls.profile = Profile.objects.create(user=cls.user)
+        cls.other_profile = Profile.objects.create(user=cls.other_user)
         cls.high = Category.objects.create(urgency="high")
         cls.low = Category.objects.create(urgency="low")
 
@@ -31,7 +34,7 @@ class TaskAPITestCase(APITestCase):
 
     def make_task(self, creator=None, **kwargs):
         fields = {
-            "creator": creator or self.user,
+            "creator": creator or self.profile,
             "title": "Task",
             "body": "Body",
             "deadline": timezone.now() + timedelta(days=1),
@@ -73,7 +76,7 @@ class AuthenticationTests(TaskAPITestCase):
 class ListTaskTests(TaskAPITestCase):
     def test_returns_only_own_tasks(self):
         own = self.make_task(title="Mine")
-        self.make_task(creator=self.other_user, title="Not mine")
+        self.make_task(creator=self.other_profile, title="Not mine")
 
         response = self.client.get(TASKS_URL)
 
@@ -81,7 +84,7 @@ class ListTaskTests(TaskAPITestCase):
         self.assertEqual([task["pk"] for task in response.data], [own.pk])
 
     def test_returns_empty_list_without_tasks(self):
-        self.make_task(creator=self.other_user)
+        self.make_task(creator=self.other_profile)
 
         response = self.client.get(TASKS_URL)
 
@@ -135,10 +138,20 @@ class CreateTaskTests(TaskAPITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         task = Task.objects.get(pk=response.data["pk"])
-        self.assertEqual(task.creator, self.user)
+        self.assertEqual(task.creator, self.profile)
         self.assertEqual(task.title, "New task")
         self.assertEqual(task.category, self.high)
         self.assertFalse(task.completed)
+
+    def test_creates_profile_for_user_without_one(self):
+        user = User.objects.create_user(username="no_profile", password="pass")
+        self.client.force_authenticate(user)
+
+        response = self.client.post(TASKS_URL, self.task_payload())
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        task = Task.objects.get(pk=response.data["pk"])
+        self.assertEqual(task.creator, Profile.objects.get(user=user))
 
     def test_creator_from_payload_is_ignored(self):
         response = self.client.post(
@@ -146,7 +159,7 @@ class CreateTaskTests(TaskAPITestCase):
         )
 
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
-        self.assertEqual(Task.objects.get(pk=response.data["pk"]).creator, self.user)
+        self.assertEqual(Task.objects.get(pk=response.data["pk"]).creator, self.profile)
 
     def test_read_only_fields_from_payload_are_ignored(self):
         created_at = timezone.now() - timedelta(days=30)
@@ -191,7 +204,7 @@ class RetrieveTaskTests(TaskAPITestCase):
         self.assertEqual(response.data["title"], "Mine")
 
     def test_foreign_task_is_not_found(self):
-        task = self.make_task(creator=self.other_user)
+        task = self.make_task(creator=self.other_profile)
 
         response = self.client.get(task_url(task.pk))
 
@@ -258,10 +271,10 @@ class UpdateTaskTests(TaskAPITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         task.refresh_from_db()
-        self.assertEqual(task.creator, self.user)
+        self.assertEqual(task.creator, self.profile)
 
     def test_foreign_task_is_not_updated(self):
-        task = self.make_task(creator=self.other_user, title="Not mine")
+        task = self.make_task(creator=self.other_profile, title="Not mine")
 
         for method in ("patch", "put"):
             with self.subTest(method=method):
@@ -284,7 +297,7 @@ class DeleteTaskTests(TaskAPITestCase):
         self.assertFalse(Task.objects.filter(pk=task.pk).exists())
 
     def test_foreign_task_is_not_deleted(self):
-        task = self.make_task(creator=self.other_user)
+        task = self.make_task(creator=self.other_profile)
 
         response = self.client.delete(task_url(task.pk))
 

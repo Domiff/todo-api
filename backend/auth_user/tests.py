@@ -3,7 +3,7 @@ from django.test import override_settings
 from rest_framework import status
 from rest_framework.test import APITestCase
 
-from auth_user.models import TgProfile, WebProfile
+from auth_user.models import Profile
 
 TG_REGISTER_URL = "/auth/tg/register/"
 WEB_REGISTER_URL = "/auth/web/register/"
@@ -37,9 +37,11 @@ class TgRegisterTests(AuthAPITestCase):
         self.assert_tokens(response.data)
         user = User.objects.get(pk=response.data["id"])
         self.assertEqual(user.username, "tg-123456")
-        profile = TgProfile.objects.get(user=user)
+        self.assertEqual(user.first_name, "First")
+        self.assertEqual(user.last_name, "Last")
+        profile = Profile.objects.get(user=user)
         self.assertEqual(profile.tg_id, 123456)
-        self.assertEqual(profile.username, "tg_user")
+        self.assertIsNone(profile.email)
 
     def test_repeated_registration_returns_same_user(self):
         first = self.client.post(TG_REGISTER_URL, self.payload)
@@ -48,7 +50,7 @@ class TgRegisterTests(AuthAPITestCase):
         self.assertEqual(second.status_code, status.HTTP_201_CREATED)
         self.assertEqual(first.data["id"], second.data["id"])
         self.assertEqual(User.objects.count(), 1)
-        self.assertEqual(TgProfile.objects.count(), 1)
+        self.assertEqual(Profile.objects.count(), 1)
 
     def test_required_fields(self):
         response = self.client.post(TG_REGISTER_URL, {})
@@ -78,12 +80,14 @@ class WebRegisterTests(AuthAPITestCase):
         self.assertEqual(user.username, "web_user")
         self.assertEqual(user.email, "web@example.com")
         self.assertTrue(user.check_password("strong-password"))
-        self.assertTrue(WebProfile.objects.filter(user=user).exists())
+        profile = Profile.objects.get(user=user)
+        self.assertEqual(profile.email, "web@example.com")
+        self.assertIsNone(profile.tg_id)
 
     def test_password_is_not_stored_in_profile(self):
         self.client.post(WEB_REGISTER_URL, self.payload)
 
-        self.assertFalse(hasattr(WebProfile.objects.get(), "password"))
+        self.assertFalse(hasattr(Profile.objects.get(), "password"))
 
     def test_invalid_email_is_rejected(self):
         response = self.client.post(

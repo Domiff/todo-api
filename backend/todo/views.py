@@ -1,6 +1,6 @@
 from adrf.viewsets import ModelViewSet
 
-from auth_user.models import TgProfile
+from auth_user.models import Profile
 from core.messaging.events import Event
 from todo.events import TadkEventType, TaskCreatedData, TaskDeletedData, TaskUpdatedData
 from todo.models import Task
@@ -14,18 +14,16 @@ class TaskViewSet(ModelViewSet):
 
     async def afilter_queryset(self, queryset):
         queryset = await super().afilter_queryset(queryset)
-        return queryset.filter(creator=self.request.user).select_related("category")
+        return queryset.filter(creator__user=self.request.user).select_related(
+            "category", "creator"
+        )
 
     async def perform_acreate(self, serializer: TaskSerializer):
-        await super().perform_acreate(serializer)
-        task: Task = serializer.instance
+        # у пользователя без регистрации (например, суперпользователя) профиля ещё нет
+        profile, _ = await Profile.objects.aget_or_create(user=self.request.user)
+        task: Task = await serializer.asave(creator=profile)
 
-        tg_id = (
-            await TgProfile.objects.filter(user=self.request.user)
-            .values_list("tg_id", flat=True)
-            .afirst()
-        )
-        if tg_id is None:
+        if profile.tg_id is None:
             return
 
         event = Event(
@@ -33,7 +31,7 @@ class TaskViewSet(ModelViewSet):
             subject=f"tasks/{task.pk}",
             data=TaskCreatedData(
                 task_id=task.pk,
-                tg_id=tg_id,
+                tg_id=profile.tg_id,
                 title=task.title,
                 deadline=task.deadline,
             ),
@@ -43,11 +41,7 @@ class TaskViewSet(ModelViewSet):
     async def perform_aupdate(self, serializer):
         await super().perform_aupdate(serializer)
         task: Task = serializer.instance
-        tg_id = (
-            await TgProfile.objects.filter(user=self.request.user)
-            .values_list("tg_id", flat=True)
-            .afirst()
-        )
+        tg_id = task.creator.tg_id
         if tg_id is None:
             return
 
@@ -60,7 +54,7 @@ class TaskViewSet(ModelViewSet):
                 title=task.title,
                 body=task.body,
                 completed=task.completed,
-                category=task.category.urgency,
+                category=task.category.urgency if task.category else "",
                 deadline=task.deadline,
             ),
         )
@@ -69,12 +63,8 @@ class TaskViewSet(ModelViewSet):
     async def perform_adestroy(self, instance):
         task_id = instance.pk
         title = instance.title
+        tg_id = instance.creator.tg_id
         await super().perform_adestroy(instance)
-        tg_id = (
-            await TgProfile.objects.filter(user=self.request.user)
-            .values_list("tg_id", flat=True)
-            .afirst()
-        )
         if tg_id is None:
             return
 

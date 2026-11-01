@@ -1,4 +1,3 @@
-from django.contrib.auth.models import User
 from django.db import models
 
 
@@ -13,7 +12,7 @@ class Category(models.Model):
 
 
 class Task(models.Model):
-    creator = models.ForeignKey(User, on_delete=models.CASCADE)
+    creator = models.ForeignKey("auth_user.Profile", on_delete=models.CASCADE)
     title = models.CharField(max_length=200)
     body = models.TextField()
     completed = models.BooleanField(default=False)
@@ -22,7 +21,9 @@ class Task(models.Model):
     deadline = models.DateTimeField()
     category = models.ForeignKey(
         Category,
-        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
         related_name="tasks",
     )
 

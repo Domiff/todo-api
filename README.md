@@ -53,7 +53,7 @@ with categories, deadlines, and completion status.
 │   └── auth_user/                    # Registration & JWT-facing views
 │       ├── migrations/
 │       ├── admin.py
-│       ├── models.py                 # TgProfile, WebProfile
+│       ├── models.py                 # Profile (tg_id, email)
 │       ├── serializers.py
 │       ├── urls.py
 │       └── views.py

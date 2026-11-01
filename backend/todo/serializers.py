@@ -1,5 +1,4 @@
 from adrf.serializers import ModelSerializer
-from rest_framework.fields import CurrentUserDefault, HiddenField
 from rest_framework.relations import SlugRelatedField
 
 from todo.models import Category, Task
@@ -16,13 +15,11 @@ class TaskSerializer(ModelSerializer):
         slug_field="urgency",
         queryset=Category.objects.all(),
     )
-    creator = HiddenField(default=CurrentUserDefault())
 
     class Meta:
         model = Task
         fields = (
             "pk",
-            "creator",
             "title",
             "body",
             "deadline",
