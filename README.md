@@ -1,6 +1,6 @@
 # ToDo API
 
-A **Django REST API** for task management. Users register (web or Telegram), authenticate with **JWT**, and manage tasks
+A **Django REST API** for task management. Users register (from the web app or the Telegram bot), authenticate with **JWT**, and manage tasks
 with categories, deadlines, and completion status.
 
 ## Features
@@ -8,7 +8,7 @@ with categories, deadlines, and completion status.
 - **Tasks**: full CRUD through a single viewset; each user sees only their own tasks.
 - **Priorities**: every task has a priority: low, middle (default) or high.
 - **Categories**: a predefined list (work, study, personal, home, shopping, health, finance, other); a task may have none.
-- **Auth**: Simple JWT (access/refresh, blacklist on rotation); separate registration flows for Telegram and web profiles.
+- **Auth**: Simple JWT (access/refresh, blacklist on rotation); one registration endpoint for the web app and the Telegram bot.
 - **API docs**: OpenAPI schema and **Swagger UI** (drf-spectacular).
 - **Task events**: creating, updating or deleting a task publishes an event to RabbitMQ; the
   [todo-bot](https://github.com/Domiff/todo-bot) service consumes it and notifies the owner in Telegram.
@@ -55,7 +55,8 @@ with categories, deadlines, and completion status.
 │       ├── migrations/
 │       ├── admin.py
 │       ├── models.py                 # Profile (tg_id, email)
-│       ├── serializers.py
+│       ├── permissions.py            # IsBot: checks the X-Bot-Key header
+│       ├── serializers.py            # RegisterSerializer, LinkTelegramSerializer
 │       ├── urls.py
 │       └── views.py
 │
@@ -85,6 +86,7 @@ Create an env file at the **repository root** (it is gitignored; do not commit s
 | `ALLOWED_HOSTS`                                     | Comma-separated list of allowed hosts (e.g. `localhost,127.0.0.1,backend`)   |
 | `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD` | Same credentials as in todo-infrastructure's `.env`                          |
 | `POSTGRES_HOST`, `POSTGRES_PORT`                    | `todo-pg` and `5432` in Docker; `127.0.0.1` when running on the host         |
+| `BOT_API_KEY`                                       | Shared secret with todo-bot; without it `tg_id` is rejected                  |
 | `RABBITMQ_USER`, `RABBITMQ_PASSWORD`                | Same credentials as in todo-infrastructure's `.env` (required)               |
 | `RABBITMQ_HOST`, `RABBITMQ_PORT`                    | `todo-rabbitmq` and `5672` in Docker; `127.0.0.1` when running on the host   |
 
@@ -165,7 +167,7 @@ The API publishes domain events to RabbitMQ so other services can react without 
   first publish, so the backend starts even if the broker is down, but publishing then fails.
 - **Exchange**: `todo.tasks` (topic, durable). The exchange, queues and bindings are declared by
   todo-infrastructure (`definitions.json`); this service only publishes.
-- **Events** (published only for users with a Telegram profile):
+- **Events** (published only for users with a Telegram profile, and not for requests with `X-Client: Telegram`):
 
   | Routing key     | Event type             | Published when                  | `data`                                                                 |
   |-----------------|------------------------|---------------------------------|------------------------------------------------------------------------|
@@ -208,12 +210,16 @@ Base URL prefix: `/api/` for tasks, `/auth/` for registration and tokens.
 | ----- | --------------------------------------------------------------------------------------------------------------------------------------------- |
 | Tasks | `GET api/tasks/`, `POST api/tasks/`, `GET api/tasks/<id>`, `PUT/PATCH api/tasks/<id>`, `DELETE api/tasks/<id>`                                |
 | Categories | `GET api/categories/`, `GET api/categories/<slug>` (read-only)                                                                        |
-| Auth  | `POST auth/tg/register/`, `POST auth/web/register/`, `POST auth/token/`, `POST auth/token/refresh/`, `POST auth/token/blacklist/`             |
+| Auth  | `POST auth/register/`, `POST auth/tg/link/`, `POST auth/token/`, `POST auth/token/refresh/`, `POST auth/token/blacklist/`             |
 
 The trailing slash on task routes is optional: `api/tasks/5` and `api/tasks/5/` both work.
 
 When creating or updating a task, `priority` is `1`, `2` or `3` (optional, defaults to `2`) and `category` is a category slug
 such as `work` (optional, `null` for no category). Categories are created by a migration and managed in the admin.
+
+Registration takes `username`, `password` and an optional `email`. A `tg_id` is accepted only from the bot, with a matching
+`X-Bot-Key` header; the same applies to `POST auth/tg/link/`, which links Telegram to the logged-in user. Set the same `BOT_API_KEY`
+in the `.env` of todo-api and todo-bot.
 
 Interactive documentation:
 

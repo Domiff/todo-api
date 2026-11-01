@@ -31,6 +31,7 @@ env = environ.Env(
     RABBITMQ_PASSWORD=(str),
     RABBITMQ_HOST=(str),
     RABBITMQ_PORT=(int),
+    BOT_API_KEY=(str, ""),
 )
 
 environ.Env.read_env(BASE_DIR.parent / ".env")

@@ -5,16 +5,20 @@ from rest_framework.test import APITestCase
 
 from auth_user.models import Profile
 
-TG_REGISTER_URL = "/auth/tg/register/"
-WEB_REGISTER_URL = "/auth/web/register/"
+REGISTER_URL = "/auth/register/"
+TG_LINK_URL = "/auth/tg/link/"
 TOKEN_URL = "/auth/token/"
 REFRESH_URL = "/auth/token/refresh/"
 BLACKLIST_URL = "/auth/token/blacklist/"
 TASKS_URL = "/api/tasks/"
 
 
+BOT_KEY = "test-bot-key"
+
+
 @override_settings(
-    CACHES={"default": {"BACKEND": "django.core.cache.backends.dummy.DummyCache"}}
+    CACHES={"default": {"BACKEND": "django.core.cache.backends.dummy.DummyCache"}},
+    BOT_API_KEY=BOT_KEY,
 )
 class AuthAPITestCase(APITestCase):
     def assert_tokens(self, data):
@@ -22,76 +26,85 @@ class AuthAPITestCase(APITestCase):
         self.assertEqual(set(data["tokens"]), {"access", "refresh"})
 
 
-class TgRegisterTests(AuthAPITestCase):
+class RegisterTests(AuthAPITestCase):
     payload = {
-        "username": "tg_user",
-        "first_name": "First",
-        "last_name": "Last",
-        "tg_id": 123456,
+        "username": "new_user",
+        "email": "user@example.com",
+        "password": "strong-Passw0rd",
     }
 
     def test_creates_user_and_profile(self):
-        response = self.client.post(TG_REGISTER_URL, self.payload)
+        response = self.client.post(REGISTER_URL, self.payload)
 
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         self.assert_tokens(response.data)
         user = User.objects.get(pk=response.data["id"])
-        self.assertEqual(user.username, "tg-123456")
-        self.assertEqual(user.first_name, "First")
-        self.assertEqual(user.last_name, "Last")
+        self.assertEqual(user.username, "new_user")
+        self.assertEqual(user.email, "user@example.com")
+        self.assertTrue(user.check_password("strong-Passw0rd"))
         profile = Profile.objects.get(user=user)
-        self.assertEqual(profile.tg_id, 123456)
-        self.assertIsNone(profile.email)
-
-    def test_repeated_registration_returns_same_user(self):
-        first = self.client.post(TG_REGISTER_URL, self.payload)
-        second = self.client.post(TG_REGISTER_URL, self.payload)
-
-        self.assertEqual(second.status_code, status.HTTP_201_CREATED)
-        self.assertEqual(first.data["id"], second.data["id"])
-        self.assertEqual(User.objects.count(), 1)
-        self.assertEqual(Profile.objects.count(), 1)
-
-    def test_required_fields(self):
-        response = self.client.post(TG_REGISTER_URL, {})
-
-        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertEqual(
-            set(response.data), {"username", "first_name", "last_name", "tg_id"}
-        )
-        self.assertFalse(User.objects.exists())
-
-
-class WebRegisterTests(AuthAPITestCase):
-    payload = {
-        "username": "web_user",
-        "first_name": "First",
-        "last_name": "Last",
-        "email": "web@example.com",
-        "password": "strong-password",
-    }
-
-    def test_creates_user_and_profile(self):
-        response = self.client.post(WEB_REGISTER_URL, self.payload)
-
-        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
-        self.assert_tokens(response.data)
-        user = User.objects.get(pk=response.data["id"])
-        self.assertEqual(user.username, "web_user")
-        self.assertEqual(user.email, "web@example.com")
-        self.assertTrue(user.check_password("strong-password"))
-        profile = Profile.objects.get(user=user)
-        self.assertEqual(profile.email, "web@example.com")
+        self.assertEqual(profile.email, "user@example.com")
         self.assertIsNone(profile.tg_id)
 
-    def test_password_is_not_stored_in_profile(self):
-        self.client.post(WEB_REGISTER_URL, self.payload)
+    def test_email_is_optional(self):
+        payload = {"username": "new_user", "password": "strong-Passw0rd"}
 
-        self.assertFalse(hasattr(Profile.objects.get(), "password"))
+        response = self.client.post(REGISTER_URL, payload)
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertIsNone(Profile.objects.get().email)
+
+    def test_registered_user_can_log_in(self):
+        self.client.post(REGISTER_URL, self.payload)
+
+        response = self.client.post(
+            TOKEN_URL, {"username": "new_user", "password": "strong-Passw0rd"}
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    def test_taken_username_returns_no_tokens(self):
+        self.client.post(REGISTER_URL, self.payload)
+
+        response = self.client.post(
+            REGISTER_URL,
+            {"username": "new_user", "password": "another-Passw0rd"},
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("username", response.data)
+        self.assertNotIn("tokens", response.data)
+        self.assertEqual(User.objects.count(), 1)
+
+    def test_username_of_user_without_profile_is_taken(self):
+        User.objects.create_user(username="new_user", password="password")
+
+        response = self.client.post(REGISTER_URL, self.payload)
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("username", response.data)
+
+    def test_taken_email_is_rejected(self):
+        self.client.post(REGISTER_URL, self.payload)
+
+        response = self.client.post(
+            REGISTER_URL, {**self.payload, "username": "other_user"}
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("email", response.data)
+        self.assertEqual(User.objects.count(), 1)
+
+    def test_weak_password_is_rejected(self):
+        response = self.client.post(REGISTER_URL, {**self.payload, "password": "123"})
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("password", response.data)
+        self.assertFalse(User.objects.exists())
 
     def test_invalid_email_is_rejected(self):
         response = self.client.post(
-            WEB_REGISTER_URL, {**self.payload, "email": "not-an-email"}
+            REGISTER_URL, {**self.payload, "email": "not-an-email"}
         )
 
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
@@ -99,13 +112,106 @@ class WebRegisterTests(AuthAPITestCase):
         self.assertFalse(User.objects.exists())
 
     def test_required_fields(self):
-        response = self.client.post(WEB_REGISTER_URL, {})
+        response = self.client.post(REGISTER_URL, {})
 
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertEqual(
-            set(response.data),
-            {"username", "first_name", "last_name", "email", "password"},
+        self.assertEqual(set(response.data), {"username", "password"})
+
+    def test_password_is_not_returned(self):
+        response = self.client.post(REGISTER_URL, self.payload)
+
+        self.assertNotIn("password", response.data)
+
+
+class TelegramRegisterTests(AuthAPITestCase):
+    payload = {"username": "tg_user", "password": "strong-Passw0rd", "tg_id": 123456}
+
+    def test_bot_registers_user_with_tg_id(self):
+        response = self.client.post(REGISTER_URL, self.payload, HTTP_X_BOT_KEY=BOT_KEY)
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(Profile.objects.get().tg_id, 123456)
+
+    def test_tg_id_without_key_is_forbidden(self):
+        response = self.client.post(REGISTER_URL, self.payload)
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertFalse(User.objects.exists())
+
+    def test_tg_id_with_wrong_key_is_forbidden(self):
+        response = self.client.post(REGISTER_URL, self.payload, HTTP_X_BOT_KEY="wrong")
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    @override_settings(BOT_API_KEY="")
+    def test_empty_key_forbids_tg_id(self):
+        response = self.client.post(REGISTER_URL, self.payload, HTTP_X_BOT_KEY="")
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_registered_tg_id_is_rejected(self):
+        self.client.post(REGISTER_URL, self.payload, HTTP_X_BOT_KEY=BOT_KEY)
+
+        response = self.client.post(
+            REGISTER_URL,
+            {**self.payload, "username": "other_user"},
+            HTTP_X_BOT_KEY=BOT_KEY,
         )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("tg_id", response.data)
+        self.assertEqual(User.objects.count(), 1)
+
+
+class LinkTelegramTests(AuthAPITestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.user = User.objects.create_user(username="user", password="password")
+
+    def setUp(self):
+        self.client.force_authenticate(self.user)
+
+    def link(self, tg_id=123456, key=BOT_KEY):
+        return self.client.post(TG_LINK_URL, {"tg_id": tg_id}, HTTP_X_BOT_KEY=key)
+
+    def test_links_tg_id_and_creates_profile(self):
+        response = self.link()
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(Profile.objects.get(user=self.user).tg_id, 123456)
+
+    def test_repeated_link_is_allowed(self):
+        self.link()
+
+        self.assertEqual(self.link().status_code, status.HTTP_200_OK)
+
+    def test_key_is_required(self):
+        response = self.link(key="wrong")
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertFalse(Profile.objects.exists())
+
+    def test_authentication_is_required(self):
+        self.client.force_authenticate(None)
+
+        self.assertEqual(self.link().status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_tg_id_of_another_user_is_rejected(self):
+        other = User.objects.create_user(username="other", password="password")
+        Profile.objects.create(user=other, tg_id=123456)
+
+        response = self.link()
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertFalse(Profile.objects.filter(user=self.user).exclude(tg_id=None))
+
+    def test_second_tg_id_is_rejected(self):
+        self.link()
+
+        response = self.link(tg_id=654321)
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(Profile.objects.get(user=self.user).tg_id, 123456)
 
 
 class TokenTests(AuthAPITestCase):
@@ -172,3 +278,11 @@ class TokenTests(AuthAPITestCase):
 
         self.assertEqual(blacklist.status_code, status.HTTP_200_OK)
         self.assertEqual(refresh.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_refresh_of_deleted_user_is_rejected(self):
+        tokens = self.obtain_tokens()
+        self.user.delete()
+
+        response = self.client.post(REFRESH_URL, {"refresh": tokens["refresh"]})
+
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
