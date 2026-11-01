@@ -6,7 +6,7 @@ from todo.models import Category, Task
 
 @admin.register(Category)
 class CategoryAdmin(ModelAdmin):
-    list_display = ["urgency"]
+    list_display = ["slug", "name"]
 
 
 @admin.register(Task)
@@ -18,6 +18,7 @@ class TaskAdmin(ModelAdmin):
         "created_at",
         "updated_at",
         "deadline",
+        "priority",
         "category",
     ]
     list_editable = [

@@ -25,6 +25,7 @@ class TaskUpdatedData:
     body: str
     completed: bool
     deadline: datetime
+    priority: int
     category: str
 
 

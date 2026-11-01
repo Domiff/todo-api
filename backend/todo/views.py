@@ -1,11 +1,17 @@
-from adrf.viewsets import ModelViewSet
+from adrf.viewsets import ModelViewSet, ReadOnlyModelViewSet
 
 from auth_user.models import Profile
 from core.messaging.events import Event
 from todo.events import TadkEventType, TaskCreatedData, TaskDeletedData, TaskUpdatedData
-from todo.models import Task
+from todo.models import Category, Task
 from todo.producers import TaskRoutingKey, publish
-from todo.serializers import TaskSerializer
+from todo.serializers import CategorySerializer, TaskSerializer
+
+
+class CategoryViewSet(ReadOnlyModelViewSet):
+    serializer_class = CategorySerializer
+    queryset = Category.objects.all()
+    lookup_field = "slug"
 
 
 class TaskViewSet(ModelViewSet):
@@ -54,7 +60,8 @@ class TaskViewSet(ModelViewSet):
                 title=task.title,
                 body=task.body,
                 completed=task.completed,
-                category=task.category.urgency if task.category else "",
+                priority=task.priority,
+                category=task.category.slug if task.category else "",
                 deadline=task.deadline,
             ),
         )

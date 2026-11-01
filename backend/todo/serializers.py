@@ -7,13 +7,15 @@ from todo.models import Category, Task
 class CategorySerializer(ModelSerializer):
     class Meta:
         model = Category
-        fields = ("urgency",)
+        fields = ("slug", "name")
 
 
 class TaskSerializer(ModelSerializer):
     category = SlugRelatedField(
-        slug_field="urgency",
+        slug_field="slug",
         queryset=Category.objects.all(),
+        required=False,
+        allow_null=True,
     )
 
     class Meta:
@@ -23,6 +25,7 @@ class TaskSerializer(ModelSerializer):
             "title",
             "body",
             "deadline",
+            "priority",
             "category",
             "completed",
             "created_at",
