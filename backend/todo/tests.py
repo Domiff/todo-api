@@ -470,3 +470,18 @@ class TaskEventTests(TaskAPITestCase):
         self.client.post(TASKS_URL, {})
 
         self.publish.assert_not_awaited()
+
+    def test_nothing_is_published_for_telegram_client(self):
+        pk = self.client.post(
+            TASKS_URL, self.task_payload(), HTTP_X_CLIENT="Telegram"
+        ).data["pk"]
+        self.client.patch(task_url(pk), {"completed": True}, HTTP_X_CLIENT="Telegram")
+        self.client.delete(task_url(pk), HTTP_X_CLIENT="Telegram")
+
+        self.assertFalse(Task.objects.filter(pk=pk).exists())
+        self.publish.assert_not_awaited()
+
+    def test_other_client_header_still_publishes(self):
+        self.client.post(TASKS_URL, self.task_payload(), HTTP_X_CLIENT="Web")
+
+        self.publish.assert_awaited_once()

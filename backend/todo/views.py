@@ -24,12 +24,14 @@ class TaskViewSet(ModelViewSet):
             "category", "creator"
         )
 
+    def should_notify(self, tg_id: int | None) -> bool:
+        return tg_id is not None and self.request.headers.get("X-Client") != "Telegram"
+
     async def perform_acreate(self, serializer: TaskSerializer):
-        # у пользователя без регистрации (например, суперпользователя) профиля ещё нет
         profile, _ = await Profile.objects.aget_or_create(user=self.request.user)
         task: Task = await serializer.asave(creator=profile)
 
-        if profile.tg_id is None:
+        if not self.should_notify(profile.tg_id):
             return
 
         event = Event(
@@ -48,7 +50,7 @@ class TaskViewSet(ModelViewSet):
         await super().perform_aupdate(serializer)
         task: Task = serializer.instance
         tg_id = task.creator.tg_id
-        if tg_id is None:
+        if not self.should_notify(tg_id):
             return
 
         event = Event(
@@ -72,7 +74,7 @@ class TaskViewSet(ModelViewSet):
         title = instance.title
         tg_id = instance.creator.tg_id
         await super().perform_adestroy(instance)
-        if tg_id is None:
+        if not self.should_notify(tg_id):
             return
 
         event = Event(
