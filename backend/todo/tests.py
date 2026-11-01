@@ -1,4 +1,5 @@
 from datetime import timedelta
+from unittest.mock import AsyncMock, patch
 
 from django.contrib.auth.models import User
 from django.test import override_settings
@@ -7,7 +8,9 @@ from rest_framework import status
 from rest_framework.test import APITestCase
 
 from auth_user.models import Profile
+from todo.events import TadkEventType
 from todo.models import Category, Task
+from todo.producers import TaskRoutingKey
 
 TASKS_URL = "/api/tasks/"
 
@@ -31,6 +34,9 @@ class TaskAPITestCase(APITestCase):
 
     def setUp(self):
         self.client.force_authenticate(self.user)
+        patcher = patch("todo.views.publish", new_callable=AsyncMock)
+        self.publish = patcher.start()
+        self.addCleanup(patcher.stop)
 
     def make_task(self, creator=None, **kwargs):
         fields = {
@@ -303,3 +309,80 @@ class DeleteTaskTests(TaskAPITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
         self.assertTrue(Task.objects.filter(pk=task.pk).exists())
+
+
+class TaskEventTests(TaskAPITestCase):
+    def setUp(self):
+        super().setUp()
+        self.profile.tg_id = 777
+        self.profile.save()
+
+    def published(self):
+        self.publish.assert_awaited_once()
+        kwargs = self.publish.await_args.kwargs
+        return kwargs["event"], kwargs["routing_key"]
+
+    def test_create_publishes_event(self):
+        response = self.client.post(TASKS_URL, self.task_payload())
+
+        event, routing_key = self.published()
+        pk = response.data["pk"]
+        self.assertEqual(routing_key, TaskRoutingKey.CREATED)
+        self.assertEqual(event.type, TadkEventType.CREATED_EVENT)
+        self.assertEqual(event.subject, f"tasks/{pk}")
+        self.assertEqual(event.data.task_id, pk)
+        self.assertEqual(event.data.tg_id, 777)
+
+    def test_update_publishes_event(self):
+        task = self.make_task()
+
+        self.client.patch(task_url(task.pk), {"completed": True})
+
+        event, routing_key = self.published()
+        self.assertEqual(routing_key, TaskRoutingKey.UPDATED)
+        self.assertEqual(event.type, TadkEventType.UPDATED_EVENT)
+        self.assertEqual(event.data.task_id, task.pk)
+        self.assertTrue(event.data.completed)
+        self.assertEqual(event.data.category, "high")
+
+    def test_update_of_task_without_category_publishes_empty_category(self):
+        task = self.make_task(category=None)
+
+        self.client.patch(task_url(task.pk), {"completed": True})
+
+        event, _ = self.published()
+        self.assertEqual(event.data.category, "")
+
+    def test_delete_publishes_event_with_task_id(self):
+        task = self.make_task(title="Removed")
+        pk = task.pk
+
+        self.client.delete(task_url(pk))
+
+        event, routing_key = self.published()
+        self.assertEqual(routing_key, TaskRoutingKey.DELETED)
+        self.assertEqual(event.type, TadkEventType.DELETED_EVENT)
+        self.assertEqual(event.subject, f"tasks/{pk}")
+        self.assertEqual(event.data.task_id, pk)
+        self.assertEqual(event.data.title, "Removed")
+
+    def test_events_are_serializable(self):
+        self.client.post(TASKS_URL, self.task_payload())
+
+        event, _ = self.published()
+        self.assertIsInstance(event.to_bytes(), bytes)
+
+    def test_nothing_is_published_without_tg_id(self):
+        self.profile.tg_id = None
+        self.profile.save()
+
+        pk = self.client.post(TASKS_URL, self.task_payload()).data["pk"]
+        self.client.patch(task_url(pk), {"completed": True})
+        self.client.delete(task_url(pk))
+
+        self.publish.assert_not_awaited()
+
+    def test_invalid_request_publishes_nothing(self):
+        self.client.post(TASKS_URL, {})
+
+        self.publish.assert_not_awaited()
