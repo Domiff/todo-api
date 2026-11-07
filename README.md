@@ -22,7 +22,7 @@ with categories, deadlines, and completion status.
 | Database       | PostgreSQL; SQLite when `DEBUG=True`                               |
 | Messaging      | RabbitMQ (aio-pika), events in CloudEvents 1.0 JSON format         |
 | Tooling        | uv, Ruff, pre-commit                                               |
-| Infrastructure | Postgres, RabbitMQ and logging live in [todo-infrastructure](#infrastructure) |
+| Infrastructure | Postgres, RabbitMQ, the Caddy reverse proxy and logging live in [todo-infrastructure](#infrastructure) |
 
 
 ## Application structure
@@ -62,7 +62,7 @@ with categories, deadlines, and completion status.
 │
 ├── Dockerfile
 ├── Justfile
-├── docker-compose.yml                # backend only; infrastructure is in todo-infrastructure
+├── docker-compose.yml                # backend only; infrastructure and the proxy are in todo-infrastructure
 ├── pyproject.toml                    # uv dependency groups: backend, dev
 └── uv.lock
 ```
@@ -83,12 +83,33 @@ Create an env file at the **repository root** (it is gitignored; do not commit s
 |-----------------------------------------------------|------------------------------------------------------------------------------|
 | `DJANGO_SECRET_KEY`                                 | Django secret                                                                |
 | `DJANGO_DEBUG`                                      | `True` → SQLite (local dev); `False` → Postgres (Docker, production)         |
-| `ALLOWED_HOSTS`                                     | Comma-separated list of allowed hosts (e.g. `localhost,127.0.0.1,backend`)   |
+| `ALLOWED_HOSTS`                                     | Comma-separated list of allowed hosts (e.g. `localhost,127.0.0.1`; add the domain in production) |
+| `CORS_ALLOWED_ORIGINS`                              | Comma-separated frontend origins (e.g. `http://localhost:5173`)              |
+| `CSRF_TRUSTED_ORIGINS`                              | Comma-separated origins with scheme for forms and the admin (e.g. `https://api.example.com`) |
 | `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD` | Same credentials as in todo-infrastructure's `.env`                          |
 | `POSTGRES_HOST`, `POSTGRES_PORT`                    | `todo-pg` and `5432` in Docker; `127.0.0.1` when running on the host         |
 | `BOT_API_KEY`                                       | Shared secret with todo-bot; without it `tg_id` is rejected                  |
 | `RABBITMQ_USER`, `RABBITMQ_PASSWORD`                | Same credentials as in todo-infrastructure's `.env` (required)               |
 | `RABBITMQ_HOST`, `RABBITMQ_PORT`                    | `todo-rabbitmq` and `5672` in Docker; `127.0.0.1` when running on the host   |
+
+HTTPS settings. Their defaults are for production, so they must be turned off when the API is opened over plain HTTP:
+
+| Variable                         | Default    | Local (HTTP) | Purpose                                              |
+|----------------------------------|------------|--------------|------------------------------------------------------|
+| `SECURE_SSL_REDIRECT`            | `True`     | `False`      | redirect every `http` request to `https`             |
+| `CSRF_COOKIE_SECURE`             | `True`     | `False`      | send the CSRF cookie over HTTPS only                 |
+| `SESSION_COOKIE_SECURE`          | `True`     | `False`      | send the session cookie over HTTPS only (admin login) |
+| `SECURE_HSTS_SECONDS`            | `31536000` | `0`          | tell browsers to use only HTTPS for this host (1 year) |
+| `SECURE_HSTS_INCLUDE_SUBDOMAINS` | `True`     | `False`      | apply HSTS to all subdomains                         |
+| `SECURE_HSTS_PRELOAD`            | `True`     | `False`      | allow adding the domain to the browsers' HSTS preload list |
+
+With `SECURE_SSL_REDIRECT=True` over HTTP Django answers with a permanent `301` to `https`, and the
+browser caches it: after setting it to `False`, open the site in a private window or clear the
+browser cache. Turn HSTS on only when HTTPS works on the domain: browsers then refuse plain HTTP for
+it for `SECURE_HSTS_SECONDS`.
+
+Behind the proxy HTTPS ends at Caddy, and Django learns the original scheme from the
+`X-Forwarded-Proto` header (`SECURE_PROXY_SSL_HEADER` in `core/settings/security.py`).
 
 ## Local development (without Docker)
 
@@ -123,9 +144,9 @@ Create an env file at the **repository root** (it is gitignored; do not commit s
 
 ## Infrastructure
 
-Postgres, RabbitMQ, Redis and logging (Grafana, Loki, Promtail) are not part of this repository.
-They run in the separate **todo-infrastructure** stack, and this service connects to it over the
-external Docker network **`todo-network`**.
+Postgres, RabbitMQ, Redis, the Caddy reverse proxy and logging (Grafana, Loki, Alloy) are not part
+of this repository. They run in the separate **todo-infrastructure** stack, and this service
+connects to it over the external Docker network **`todo-network`**.
 
 Start order: **todo-infrastructure → todo-api → todo-bot**. This compose file has no `depends_on`
 on Postgres or RabbitMQ (Compose cannot depend on another project), so the infrastructure must be
@@ -133,7 +154,8 @@ up and healthy before the backend starts.
 
 ## Docker Compose
 
-1. Start todo-infrastructure (it also expects the `todo-network` network, see its README).
+1. Start todo-infrastructure. It also expects the `todo-network` network and the `todo-static`
+   volume (see its README).
 
 2. In this repository set `DJANGO_DEBUG=False` in `.env` so the backend uses Postgres
    (`POSTGRES_HOST=todo-pg`). With `DEBUG=True` it uses SQLite **inside the container**, and the
@@ -152,12 +174,40 @@ up and healthy before the backend starts.
    docker compose exec backend python manage.py createsuperuser
    ```
 
-| Service          | Container      | Port | Notes                                                   |
-|------------------|----------------|------|---------------------------------------------------------|
-| Backend (Daphne) | `todo-backend` | 8000 | Reachable as `backend:8000` from other services in `todo-network` |
+5. Open the API through the proxy: `http://localhost:8080` locally (`SITE_ADDRESS=:8080` in
+   todo-infrastructure) or the domain in production.
 
-There is no reverse proxy in front of Daphne, and Daphne does not serve static files: with
-`DEBUG=False` the admin and Swagger UI load without styles.
+| Service          | Container      | Port                  | Notes                                                        |
+|------------------|----------------|-----------------------|--------------------------------------------------------------|
+| Backend (Daphne) | `todo-backend` | 8000 (not published)  | Reachable as `todo-backend:8000` from other services in `todo-network` |
+
+### Static files and the reverse proxy
+
+Daphne does not serve static files, so the backend is not published to the host and is opened only
+through Caddy from todo-infrastructure. Caddy answers `/static/*` itself and forwards everything
+else to `todo-backend:8000`.
+
+```
+browser ──> todo-caddy ──/static/*──> volume todo-static
+                       └─everything else──> todo-backend:8000
+```
+
+- `STATIC_ROOT` is `backend/static` (`/backend/static` in the container).
+- The external volume `todo-static` is mounted there, and the container runs `collectstatic` before
+  Daphne on every start, so the volume always has the static files of the running version.
+- Caddy mounts the same volume read-only and serves it.
+
+The `static/` folder on the host is not used by Docker (only `backend/` is copied into the image)
+and is gitignored.
+
+Check that static files are served:
+
+```bash
+curl -I http://localhost:8080/static/admin/css/base.css
+```
+
+`404` means the volume is empty: check that the backend started and ran `collectstatic`
+(`docker logs todo-backend`).
 
 ## Messaging
 
@@ -228,7 +278,7 @@ Interactive documentation:
 
 Django admin (Unfold theme): `/admin/`
 
-CORS is preconfigured for Vite dev origins (`localhost:5173`); extend `CORS_ALLOWED_ORIGINS` in settings if your frontend uses another URL.
+CORS origins come from `CORS_ALLOWED_ORIGINS` in `.env` (e.g. `http://localhost:5173` for the Vite dev server).
 
 ## Development tooling
 
