@@ -6,6 +6,7 @@ with categories, deadlines, and completion status.
 ## Features
 
 - **Tasks**: full CRUD through a single viewset; each user sees only their own tasks.
+- **Completion**: `complete` and `in-progress` actions toggle a task's status; `completed_at` records when it was completed.
 - **Priorities**: every task has a priority: low, middle (default) or high.
 - **Categories**: a predefined list (work, study, personal, home, shopping, health, finance, other); a task may have none.
 - **Auth**: Simple JWT (access/refresh, blacklist on rotation); one registration endpoint for the web app and the Telegram bot.
@@ -222,7 +223,7 @@ The API publishes domain events to RabbitMQ so other services can react without 
   | Routing key     | Event type             | Published when                  | `data`                                                                 |
   |-----------------|------------------------|---------------------------------|------------------------------------------------------------------------|
   | `tasks.created` | `todo.task.created.v1` | a task is created               | `task_id`, `tg_id`, `title`, `deadline`                                |
-  | `tasks.updated` | `todo.task.updated.v1` | a task is updated (PUT / PATCH) | `task_id`, `tg_id`, `title`, `body`, `completed`, `deadline`, `priority`, `category` |
+  | `tasks.updated` | `todo.task.updated.v1` | a task is updated (PUT / PATCH) or its status changes (`complete` / `in-progress`) | `task_id`, `tg_id`, `title`, `body`, `completed`, `deadline`, `priority`, `category` |
   | `tasks.deleted` | `todo.task.deleted.v1` | a task is deleted               | `task_id`, `tg_id`, `title`                                            |
 
   `category` is the category's slug (an empty string if the task has none); `priority` is 1 (low), 2 (middle) or 3 (high); `completed` is a boolean. Event types live in
@@ -258,7 +259,7 @@ Base URL prefix: `/api/` for tasks, `/auth/` for registration and tokens.
 
 | Area  | Example paths                                                                                                                                 |
 | ----- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| Tasks | `GET api/tasks/`, `POST api/tasks/`, `GET api/tasks/<id>`, `PUT/PATCH api/tasks/<id>`, `DELETE api/tasks/<id>`                                |
+| Tasks | `GET api/tasks/`, `POST api/tasks/`, `GET api/tasks/<id>`, `PUT/PATCH api/tasks/<id>`, `DELETE api/tasks/<id>`, `POST api/tasks/<id>/complete`, `POST api/tasks/<id>/in-progress` |
 | Categories | `GET api/categories/`, `GET api/categories/<slug>` (read-only)                                                                        |
 | Auth  | `POST auth/register/`, `POST auth/tg/link/`, `POST auth/token/`, `POST auth/token/refresh/`, `POST auth/token/blacklist/`             |
 
@@ -266,6 +267,11 @@ The trailing slash on task routes is optional: `api/tasks/5` and `api/tasks/5/` 
 
 When creating or updating a task, `priority` is `1`, `2` or `3` (optional, defaults to `2`) and `category` is a category slug
 such as `work` (optional, `null` for no category). Categories are created by a migration and managed in the admin.
+
+`POST api/tasks/<id>/complete` marks a task as completed and `POST api/tasks/<id>/in-progress` reopens it; both take no body
+and return the task. `completed_at` is read-only: it is set when a task becomes completed (through these actions or `completed`
+in PUT / PATCH), kept while the task stays completed, and cleared when the task is reopened. Repeating an action on a task that
+is already in that state changes nothing and publishes no event.
 
 Registration takes `username`, `password` and an optional `email`. A `tg_id` is accepted only from the bot, with a matching
 `X-Bot-Key` header; the same applies to `POST auth/tg/link/`, which links Telegram to the logged-in user. Set the same `BOT_API_KEY`
