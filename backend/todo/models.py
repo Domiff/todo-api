@@ -24,8 +24,6 @@ class Task(models.Model):
     title = models.CharField(max_length=200)
     body = models.TextField()
     completed = models.BooleanField(default=False)
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
     deadline = models.DateTimeField()
     priority = models.PositiveSmallIntegerField(
         choices=Priority.choices,
@@ -40,6 +38,10 @@ class Task(models.Model):
         related_name="tasks",
         verbose_name="Category",
     )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         ordering = ["-updated_at"]

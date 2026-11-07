@@ -30,4 +30,6 @@ class TaskSerializer(ModelSerializer):
             "completed",
             "created_at",
             "updated_at",
+            "completed_at",
         )
+        read_only_fields = ("completed_at",)

@@ -115,6 +115,7 @@ class ListTaskTests(TaskAPITestCase):
                 "completed",
                 "created_at",
                 "updated_at",
+                "completed_at",
             },
         )
         self.assertEqual(response.data[0]["pk"], task.pk)
@@ -313,6 +314,110 @@ class DeleteTaskTests(TaskAPITestCase):
         self.assertTrue(Task.objects.filter(pk=task.pk).exists())
 
 
+class TaskStatusActionTests(TaskAPITestCase):
+    def complete_url(self, pk):
+        return f"{task_url(pk)}complete/"
+
+    def in_progress_url(self, pk):
+        return f"{task_url(pk)}in-progress/"
+
+    def test_complete_marks_task_completed(self):
+        task = self.make_task()
+
+        response = self.client.post(self.complete_url(task.pk))
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertTrue(response.data["completed"])
+        task.refresh_from_db()
+        self.assertTrue(task.completed)
+        self.assertIsNotNone(task.completed_at)
+
+    def test_complete_keeps_first_completion_time(self):
+        completed_at = timezone.now() - timedelta(days=1)
+        task = self.make_task(completed=True, completed_at=completed_at)
+
+        response = self.client.post(self.complete_url(task.pk))
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        task.refresh_from_db()
+        self.assertEqual(task.completed_at, completed_at)
+
+    def test_in_progress_reopens_task(self):
+        task = self.make_task(completed=True, completed_at=timezone.now())
+
+        response = self.client.post(self.in_progress_url(task.pk))
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertFalse(response.data["completed"])
+        task.refresh_from_db()
+        self.assertFalse(task.completed)
+        self.assertIsNone(task.completed_at)
+
+    def test_foreign_task_is_not_changed(self):
+        task = self.make_task(creator=self.other_profile)
+
+        for url in (self.complete_url(task.pk), self.in_progress_url(task.pk)):
+            with self.subTest(url=url):
+                response = self.client.post(url)
+                self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+        task.refresh_from_db()
+        self.assertFalse(task.completed)
+
+    def test_get_is_not_allowed(self):
+        task = self.make_task()
+
+        response = self.client.get(self.complete_url(task.pk))
+
+        self.assertEqual(response.status_code, status.HTTP_405_METHOD_NOT_ALLOWED)
+
+    def test_patch_completed_sets_completed_at(self):
+        task = self.make_task()
+
+        response = self.client.patch(task_url(task.pk), {"completed": True})
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIsNotNone(response.data["completed_at"])
+        task.refresh_from_db()
+        self.assertIsNotNone(task.completed_at)
+
+    def test_patch_not_completed_clears_completed_at(self):
+        task = self.make_task(completed=True, completed_at=timezone.now())
+
+        self.client.patch(task_url(task.pk), {"completed": False})
+
+        task.refresh_from_db()
+        self.assertIsNone(task.completed_at)
+
+    def test_patch_of_completed_task_keeps_completed_at(self):
+        completed_at = timezone.now() - timedelta(days=1)
+        task = self.make_task(completed=True, completed_at=completed_at)
+
+        for payload in ({"title": "Renamed"}, {"completed": True}):
+            with self.subTest(payload=payload):
+                self.client.patch(task_url(task.pk), payload)
+                task.refresh_from_db()
+                self.assertEqual(task.completed_at, completed_at)
+
+    def test_put_completed_sets_completed_at(self):
+        task = self.make_task()
+
+        self.client.put(task_url(task.pk), self.task_payload(completed=True))
+
+        task.refresh_from_db()
+        self.assertIsNotNone(task.completed_at)
+
+    def test_completed_at_from_payload_is_ignored(self):
+        task = self.make_task()
+
+        self.client.patch(
+            task_url(task.pk), {"completed_at": timezone.now().isoformat()}
+        )
+
+        task.refresh_from_db()
+        self.assertIsNone(task.completed_at)
+
+
 class PriorityTests(TaskAPITestCase):
     def test_default_priority_is_middle(self):
         response = self.client.post(TASKS_URL, self.task_payload())
@@ -449,6 +554,23 @@ class TaskEventTests(TaskAPITestCase):
         self.assertEqual(event.subject, f"tasks/{pk}")
         self.assertEqual(event.data.task_id, pk)
         self.assertEqual(event.data.title, "Removed")
+
+    def test_complete_publishes_update_event(self):
+        task = self.make_task()
+
+        self.client.post(f"{task_url(task.pk)}complete/")
+
+        event, routing_key = self.published()
+        self.assertEqual(routing_key, TaskRoutingKey.UPDATED)
+        self.assertEqual(event.data.task_id, task.pk)
+        self.assertTrue(event.data.completed)
+
+    def test_repeated_complete_publishes_nothing(self):
+        task = self.make_task(completed=True, completed_at=timezone.now())
+
+        self.client.post(f"{task_url(task.pk)}complete/")
+
+        self.publish.assert_not_awaited()
 
     def test_events_are_serializable(self):
         self.client.post(TASKS_URL, self.task_payload())
