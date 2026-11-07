@@ -5,10 +5,14 @@ services:
       dockerfile: Dockerfile
     env_file:
       .env
-    ports:
-      - "8000:8000"
-    command: daphne -b 0.0.0.0 -p 8000 core.asgi:application
+    command: sh -c "python manage.py collectstatic --noinput && daphne -b 0.0.0.0 -p 8000 core.asgi:application"
+    volumes:
+      - todo-static:/backend/static
 
+volumes:
+  todo-static:
+    external: true
+    
 networks:
   default:
     external: true
