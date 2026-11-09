@@ -1,3 +1,5 @@
+from django.contrib.postgres.indexes import GinIndex
+from django.contrib.postgres.search import SearchVector, SearchVectorField
 from django.db import models
 
 
@@ -39,6 +41,13 @@ class Task(models.Model):
         verbose_name="Category",
     )
 
+    search_vector = models.GeneratedField(
+        expression=SearchVector("title", weight="A", config="russian")
+        + SearchVector("body", weight="B", config="russian"),
+        output_field=SearchVectorField(),
+        db_persist=True,
+    )
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     completed_at = models.DateTimeField(null=True, blank=True)
@@ -47,6 +56,7 @@ class Task(models.Model):
         ordering = ["-updated_at"]
         indexes = [
             models.Index(fields=["-created_at"]),
+            GinIndex(fields=["search_vector"], name="task_search_vector_idx"),
         ]
 
     def __str__(self):

@@ -1,4 +1,5 @@
-from adrf.serializers import ModelSerializer
+from adrf.serializers import ModelSerializer, Serializer
+from rest_framework import serializers
 from rest_framework.relations import SlugRelatedField
 
 from todo.models import Category, Task
@@ -33,3 +34,7 @@ class TaskSerializer(ModelSerializer):
             "completed_at",
         )
         read_only_fields = ("completed_at",)
+
+
+class SearchSerializer(Serializer):
+    query = serializers.CharField()

@@ -1,8 +1,13 @@
 from datetime import datetime
 
+from adrf.views import APIView
 from adrf.viewsets import ModelViewSet, ReadOnlyModelViewSet
+from django.contrib.postgres.search import SearchQuery, SearchRank
+from django.db.models import F
 from django.utils import timezone
+from rest_framework import status
 from rest_framework.decorators import action
+from rest_framework.request import Request
 from rest_framework.response import Response
 
 from auth_user.models import Profile
@@ -10,7 +15,7 @@ from core.messaging.events import Event
 from todo.events import TadkEventType, TaskCreatedData, TaskDeletedData, TaskUpdatedData
 from todo.models import Category, Task
 from todo.producers import TaskRoutingKey, publish
-from todo.serializers import CategorySerializer, TaskSerializer
+from todo.serializers import CategorySerializer, SearchSerializer, TaskSerializer
 
 
 def resolve_completed_at(task: Task, completed: bool) -> datetime | None:
@@ -119,3 +124,22 @@ class TaskViewSet(ModelViewSet):
     @action(detail=True, methods=["post"], url_path="in-progress")
     async def in_progress(self, request, pk=None):
         return await self.set_completed(False)
+
+
+class SearchView(APIView):
+    async def get(self, request: Request):
+        serializer = SearchSerializer(data=request.query_params)
+        serializer.is_valid(raise_exception=True)
+        search_query = SearchQuery(
+            serializer.validated_data["query"],
+            config="russian",
+            search_type="websearch",
+        )
+        tasks = (
+            Task.objects.filter(creator__user=request.user, search_vector=search_query)
+            .annotate(rank=SearchRank(F("search_vector"), search_query))
+            .order_by("-rank")
+            .select_related("category")
+        )
+        data = await TaskSerializer(tasks, many=True).adata
+        return Response(data, status=status.HTTP_200_OK)
