@@ -84,7 +84,7 @@ Create an env file at the **repository root** (it is gitignored; do not commit s
 | Variable                                            | Purpose                                                                      |
 |-----------------------------------------------------|------------------------------------------------------------------------------|
 | `DJANGO_SECRET_KEY`                                 | Django secret                                                                |
-| `DJANGO_DEBUG`                                      | `True` → SQLite; `False` → Postgres. Migrations need Postgres (see [Local development](#local-development-without-docker)) |
+| `DJANGO_DEBUG`                                      | Django debug mode (`False` by default); keep it `False` in production. It does not choose the database: Postgres is always used |
 | `ALLOWED_HOSTS`                                     | Comma-separated list of allowed hosts (e.g. `localhost,127.0.0.1`; add the domain in production) |
 | `CORS_ALLOWED_ORIGINS`                              | Comma-separated frontend origins (e.g. `http://localhost:5173`)              |
 | `CSRF_TRUSTED_ORIGINS`                              | Comma-separated origins with scheme for forms and the admin (e.g. `https://api.example.com`) |
@@ -124,7 +124,7 @@ Behind the proxy HTTPS ends at Caddy, and Django learns the original scheme from
    `.env` at the repo root with at minimum:
    ```env
    DJANGO_SECRET_KEY=your-secret-key
-   DJANGO_DEBUG=False
+   DJANGO_DEBUG=True
    ALLOWED_HOSTS=localhost,127.0.0.1
    POSTGRES_DB=todo
    POSTGRES_USER=todo
@@ -133,10 +133,10 @@ Behind the proxy HTTPS ends at Caddy, and Django learns the original scheme from
    POSTGRES_PORT=5432
    SECURE_SSL_REDIRECT=False
    ```
-   Postgres is required: the full-text search migration (`todo/migrations/0014_task_search_vector.py`)
-   adds a `tsvector` column and a GIN index, which SQLite does not support, so with `DEBUG=True`
-   (SQLite) `migrate` and the tests fail. The other HTTPS settings from the table above should be
-   turned off for plain HTTP as well.
+   The project always uses Postgres, whatever `DJANGO_DEBUG` is: full-text search
+   (`todo/migrations/0014_task_search_vector.py`) needs a `tsvector` column and a GIN index, so
+   `migrate` and the tests need a running Postgres. The other HTTPS settings from the table above
+   should be turned off for plain HTTP as well.
    The `RABBITMQ_*` variables have no defaults, so they must be set too. RabbitMQ itself only has
    to be reachable when an event is published (the connection is opened lazily).
 
@@ -169,9 +169,8 @@ up and healthy before the backend starts.
 1. Start todo-infrastructure. It also expects the `todo-network` network and the `todo-static`
    volume (see its README).
 
-2. In this repository set `DJANGO_DEBUG=False` in `.env` so the backend uses Postgres
-   (`POSTGRES_HOST=todo-pg`). With `DEBUG=True` it uses SQLite **inside the container**, where the
-   migrations fail (full-text search needs Postgres).
+2. In this repository set `POSTGRES_HOST=todo-pg` and `POSTGRES_PORT=5432` in `.env`, so the
+   backend reaches Postgres over `todo-network`, and `DJANGO_DEBUG=False` for production.
 
 3. Build and start the backend:
 
