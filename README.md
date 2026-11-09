@@ -9,6 +9,7 @@ with categories, deadlines, and completion status.
 - **Completion**: `complete` and `in-progress` actions toggle a task's status; `completed_at` records when it was completed.
 - **Priorities**: every task has a priority: low, middle (default) or high.
 - **Categories**: a predefined list (work, study, personal, home, shopping, health, finance, other); a task may have none.
+- **Search**: full-text search over the user's tasks (title and body) with PostgreSQL `tsvector` and a GIN index.
 - **Auth**: Simple JWT (access/refresh, blacklist on rotation); one registration endpoint for the web app and the Telegram bot.
 - **API docs**: OpenAPI schema and **Swagger UI** (drf-spectacular).
 - **Task events**: creating, updating or deleting a task publishes an event to RabbitMQ; the
@@ -20,7 +21,7 @@ with categories, deadlines, and completion status.
 |----------------|--------------------------------------------------------------------|
 | API            | Django 6, Django REST Framework, async views (adrf), Daphne (ASGI) |
 | Auth           | djangorestframework-simplejwt                                      |
-| Database       | PostgreSQL; SQLite when `DEBUG=True`                               |
+| Database       | PostgreSQL (required: full-text search uses `tsvector`)            |
 | Messaging      | RabbitMQ (aio-pika), events in CloudEvents 1.0 JSON format         |
 | Tooling        | uv, Ruff, pre-commit                                               |
 | Infrastructure | Postgres, RabbitMQ, the Caddy reverse proxy and logging live in [todo-infrastructure](#infrastructure) |
@@ -50,8 +51,8 @@ with categories, deadlines, and completion status.
 │   │   ├── producers.py              # publish(), routing keys
 │   │   ├── serializers.py
 │   │   ├── models.py
-│   │   ├── urls.py                   # router: tasks/
-│   │   └── views.py                  # TaskViewSet (adrf ModelViewSet)
+│   │   ├── urls.py                   # router: tasks/, categories/; search/
+│   │   └── views.py                  # TaskViewSet, CategoryViewSet, SearchView
 │   └── auth_user/                    # Registration & JWT-facing views
 │       ├── migrations/
 │       ├── admin.py
@@ -83,7 +84,7 @@ Create an env file at the **repository root** (it is gitignored; do not commit s
 | Variable                                            | Purpose                                                                      |
 |-----------------------------------------------------|------------------------------------------------------------------------------|
 | `DJANGO_SECRET_KEY`                                 | Django secret                                                                |
-| `DJANGO_DEBUG`                                      | `True` → SQLite (local dev); `False` → Postgres (Docker, production)         |
+| `DJANGO_DEBUG`                                      | `True` → SQLite; `False` → Postgres. Migrations need Postgres (see [Local development](#local-development-without-docker)) |
 | `ALLOWED_HOSTS`                                     | Comma-separated list of allowed hosts (e.g. `localhost,127.0.0.1`; add the domain in production) |
 | `CORS_ALLOWED_ORIGINS`                              | Comma-separated frontend origins (e.g. `http://localhost:5173`)              |
 | `CSRF_TRUSTED_ORIGINS`                              | Comma-separated origins with scheme for forms and the admin (e.g. `https://api.example.com`) |
@@ -119,13 +120,23 @@ Behind the proxy HTTPS ends at Caddy, and Django learns the original scheme from
    uv sync
    ```
 
-2. Create `.env` at the repo root with at minimum:
+2. Start Postgres from todo-infrastructure (`todo-pg` publishes port `5432` to the host) and create
+   `.env` at the repo root with at minimum:
    ```env
    DJANGO_SECRET_KEY=your-secret-key
-   DJANGO_DEBUG=True
+   DJANGO_DEBUG=False
    ALLOWED_HOSTS=localhost,127.0.0.1
+   POSTGRES_DB=todo
+   POSTGRES_USER=todo
+   POSTGRES_PASSWORD=change-me
+   POSTGRES_HOST=127.0.0.1
+   POSTGRES_PORT=5432
+   SECURE_SSL_REDIRECT=False
    ```
-   With `DEBUG=True` the project uses SQLite — no Postgres required.
+   Postgres is required: the full-text search migration (`todo/migrations/0014_task_search_vector.py`)
+   adds a `tsvector` column and a GIN index, which SQLite does not support, so with `DEBUG=True`
+   (SQLite) `migrate` and the tests fail. The other HTTPS settings from the table above should be
+   turned off for plain HTTP as well.
    The `RABBITMQ_*` variables have no defaults, so they must be set too. RabbitMQ itself only has
    to be reachable when an event is published (the connection is opened lazily).
 
@@ -159,8 +170,8 @@ up and healthy before the backend starts.
    volume (see its README).
 
 2. In this repository set `DJANGO_DEBUG=False` in `.env` so the backend uses Postgres
-   (`POSTGRES_HOST=todo-pg`). With `DEBUG=True` it uses SQLite **inside the container**, and the
-   data is lost every time the container is recreated.
+   (`POSTGRES_HOST=todo-pg`). With `DEBUG=True` it uses SQLite **inside the container**, where the
+   migrations fail (full-text search needs Postgres).
 
 3. Build and start the backend:
 
@@ -260,10 +271,17 @@ Base URL prefix: `/api/` for tasks, `/auth/` for registration and tokens.
 | Area  | Example paths                                                                                                                                 |
 | ----- | --------------------------------------------------------------------------------------------------------------------------------------------- |
 | Tasks | `GET api/tasks/`, `POST api/tasks/`, `GET api/tasks/<id>`, `PUT/PATCH api/tasks/<id>`, `DELETE api/tasks/<id>`, `POST api/tasks/<id>/complete`, `POST api/tasks/<id>/in-progress` |
+| Search | `GET api/search/?query=<text>`                                                                                                        |
 | Categories | `GET api/categories/`, `GET api/categories/<slug>` (read-only)                                                                        |
 | Auth  | `POST auth/register/`, `POST auth/tg/link/`, `POST auth/token/`, `POST auth/token/refresh/`, `POST auth/token/blacklist/`             |
 
-The trailing slash on task routes is optional: `api/tasks/5` and `api/tasks/5/` both work.
+Authorization: every `api/` route requires `Authorization: Bearer <access token>` (`401` without it). `auth/register/`,
+`auth/token/`, `auth/token/refresh/` and `auth/token/blacklist/` are open; `auth/tg/link/` needs both the bearer token and
+`X-Bot-Key`. The access token lives 15 minutes and the refresh token 14 days; refresh tokens rotate, and the old one is
+blacklisted. Requests are throttled: 100 a day for anonymous clients, 1000 a minute for a logged-in user (`429` above the limit).
+
+The trailing slash on task routes is optional: `api/tasks/5` and `api/tasks/5/` both work. `api/search/` needs it: without the
+slash Django answers with a `301` redirect to `api/search/`.
 
 When creating or updating a task, `priority` is `1`, `2` or `3` (optional, defaults to `2`) and `category` is a category slug
 such as `work` (optional, `null` for no category). Categories are created by a migration and managed in the admin.
@@ -272,6 +290,55 @@ such as `work` (optional, `null` for no category). Categories are created by a m
 and return the task. `completed_at` is read-only: it is set when a task becomes completed (through these actions or `completed`
 in PUT / PATCH), kept while the task stays completed, and cleared when the task is reopened. Repeating an action on a task that
 is already in that state changes nothing and publishes no event.
+
+### Search
+
+`GET api/search/?query=<text>` searches the current user's tasks by `title` and `body` and returns them sorted by relevance;
+matches in the title rank higher than matches in the body. Other users' tasks are never returned.
+
+| Parameter | In    | Type   | Required | Description                                                                 |
+|-----------|-------|--------|----------|-----------------------------------------------------------------------------|
+| `query`   | query | string | yes      | Search text; must not be empty. Supports web search syntax (see below)      |
+
+- Words are matched by their stem with the `russian` text search configuration, so `отчёты` finds `отчёт`; Latin words
+  go through the English stemmer (`running` finds `run`).
+- Syntax (`websearch_to_tsquery`): words are combined with AND, `"quoted phrase"` matches the words in order, `or` gives
+  OR, `-word` excludes a word. Invalid syntax is ignored instead of causing an error.
+- The response is a JSON array of tasks with the same fields as `GET api/tasks/`, without pagination; `[]` when nothing
+  matches.
+
+Request:
+
+```bash
+curl -H "Authorization: Bearer <access token>" "http://localhost:8080/api/search/?query=отчёт%20-черновик"
+```
+
+Response `200`:
+
+```json
+[
+  {
+    "pk": 42,
+    "title": "Сдать отчёт",
+    "body": "Квартальный отчёт для бухгалтерии",
+    "deadline": "2026-11-12T18:00:00+03:00",
+    "priority": 3,
+    "category": "work",
+    "completed": false,
+    "created_at": "2026-11-09T10:15:00+03:00",
+    "updated_at": "2026-11-09T10:15:00+03:00",
+    "completed_at": null
+  }
+]
+```
+
+Errors:
+
+| Code  | When                                                                 |
+|-------|----------------------------------------------------------------------|
+| `400` | `query` is missing or empty: `{"query": ["This field is required."]}` or `{"query": ["This field may not be blank."]}` |
+| `401` | No bearer token, or the token is invalid or expired                  |
+| `429` | Throttle limit exceeded                                              |
 
 Registration takes `username`, `password` and an optional `email`. A `tg_id` is accepted only from the bot, with a matching
 `X-Bot-Key` header; the same applies to `POST auth/tg/link/`, which links Telegram to the logged-in user. Set the same `BOT_API_KEY`
