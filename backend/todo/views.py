@@ -1,27 +1,16 @@
-from datetime import datetime
-
 from adrf.views import APIView
 from adrf.viewsets import ModelViewSet, ReadOnlyModelViewSet
 from django.contrib.postgres.search import SearchQuery, SearchRank
 from django.db.models import F
-from django.utils import timezone
 from rest_framework import status
 from rest_framework.decorators import action
 from rest_framework.request import Request
 from rest_framework.response import Response
 
-from auth_user.models import Profile
-from core.messaging.events import Event
-from todo.events import TadkEventType, TaskCreatedData, TaskDeletedData, TaskUpdatedData
+from todo.events import ChangedVia
 from todo.models import Category, Task
-from todo.producers import TaskRoutingKey, publish
 from todo.serializers import CategorySerializer, SearchSerializer, TaskSerializer
-
-
-def resolve_completed_at(task: Task, completed: bool) -> datetime | None:
-    if completed == task.completed:
-        return task.completed_at
-    return timezone.now() if completed else None
+from todo.services import task_service
 
 
 class CategoryViewSet(ReadOnlyModelViewSet):
@@ -40,90 +29,37 @@ class TaskViewSet(ModelViewSet):
             "category", "creator"
         )
 
-    def should_notify(self, tg_id: int | None) -> bool:
-        return tg_id is not None and self.request.headers.get("X-Client") != "Telegram"
+    def changed_via(self) -> ChangedVia:
+        if self.request.headers.get("X-Client") == "Telegram":
+            return ChangedVia.TELEGRAM
+        return ChangedVia.WEB
 
     async def perform_acreate(self, serializer: TaskSerializer):
-        profile, _ = await Profile.objects.aget_or_create(user=self.request.user)
-        task: Task = await serializer.asave(creator=profile)
-
-        if not self.should_notify(profile.tg_id):
-            return
-
-        event = Event(
-            type=TadkEventType.CREATED_EVENT,
-            subject=f"tasks/{task.pk}",
-            data=TaskCreatedData(
-                task_id=task.pk,
-                tg_id=profile.tg_id,
-                title=task.title,
-                deadline=task.deadline,
-            ),
+        serializer.instance = await task_service.create(
+            self.request.user, serializer.validated_data, self.changed_via()
         )
-        await publish(event=event, routing_key=TaskRoutingKey.CREATED)
 
-    async def perform_aupdate(self, serializer):
-        task: Task = serializer.instance
-        completed = serializer.validated_data.get("completed", task.completed)
-        await serializer.asave(completed_at=resolve_completed_at(task, completed))
-        await self.publish_updated(task)
-
-    async def publish_updated(self, task: Task):
-        tg_id = task.creator.tg_id
-        if not self.should_notify(tg_id):
-            return
-
-        event = Event(
-            type=TadkEventType.UPDATED_EVENT,
-            subject=f"tasks/{task.pk}",
-            data=TaskUpdatedData(
-                task_id=task.pk,
-                tg_id=tg_id,
-                title=task.title,
-                body=task.body,
-                completed=task.completed,
-                priority=task.priority,
-                category=task.category.slug if task.category else "",
-                deadline=task.deadline,
-            ),
+    async def perform_aupdate(self, serializer: TaskSerializer):
+        serializer.instance = await task_service.update(
+            serializer.instance, serializer.validated_data, self.changed_via()
         )
-        await publish(event=event, routing_key=TaskRoutingKey.UPDATED)
 
-    async def perform_adestroy(self, instance):
-        task_id = instance.pk
-        title = instance.title
-        tg_id = instance.creator.tg_id
-        await super().perform_adestroy(instance)
-        if not self.should_notify(tg_id):
-            return
-
-        event = Event(
-            type=TadkEventType.DELETED_EVENT,
-            subject=f"tasks/{task_id}",
-            data=TaskDeletedData(
-                task_id=task_id,
-                tg_id=tg_id,
-                title=title,
-            ),
-        )
-        await publish(event=event, routing_key=TaskRoutingKey.DELETED)
-
-    async def set_completed(self, completed: bool) -> Response:
-        task: Task = await self.aget_object()
-        if task.completed != completed:
-            task.completed_at = resolve_completed_at(task, completed)
-            task.completed = completed
-            await task.asave(update_fields=["completed", "completed_at", "updated_at"])
-            await self.publish_updated(task)
-        return Response(await self.get_serializer(task).adata)
+    async def perform_adestroy(self, instance: Task):
+        await task_service.delete(instance, self.changed_via())
 
     @action(detail=True, methods=["post"])
     async def complete(self, request, pk=None):
-        return await self.set_completed(True)
+        task = await task_service.set_completed(
+            await self.aget_object(), True, self.changed_via()
+        )
+        return Response(await self.get_serializer(task).adata)
 
     @action(detail=True, methods=["post"], url_path="in-progress")
     async def in_progress(self, request, pk=None):
-        return await self.set_completed(False)
+        task = await task_service.set_completed(
+            await self.aget_object(), False, self.changed_via()
+        )
+        return Response(await self.get_serializer(task).adata)
 
 
 class SearchView(APIView):

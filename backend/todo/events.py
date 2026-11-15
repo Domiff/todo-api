@@ -9,28 +9,20 @@ class TadkEventType(StrEnum):
     DELETED_EVENT = "todo.task.deleted.v1"
 
 
-@dataclass(frozen=True, kw_only=True)
-class TaskCreatedData:
-    task_id: int
-    tg_id: int
-    title: str
-    deadline: datetime
+class ChangedVia(StrEnum):
+    WEB = "web"
+    TELEGRAM = "telegram"
 
 
 @dataclass(frozen=True, kw_only=True)
-class TaskUpdatedData:
+class TaskData:
     task_id: int
-    tg_id: int
+    user_id: int
+    tg_id: int | None
+    changed_via: ChangedVia
     title: str
     body: str
     completed: bool
     deadline: datetime
     priority: int
     category: str
-
-
-@dataclass(frozen=True, kw_only=True)
-class TaskDeletedData:
-    task_id: int
-    tg_id: int
-    title: str

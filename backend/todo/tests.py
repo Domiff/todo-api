@@ -8,7 +8,7 @@ from rest_framework import status
 from rest_framework.test import APITestCase
 
 from auth_user.models import Profile
-from todo.events import TadkEventType
+from todo.events import ChangedVia, TadkEventType
 from todo.models import Category, Task
 from todo.producers import TaskRoutingKey
 
@@ -35,7 +35,7 @@ class TaskAPITestCase(APITestCase):
 
     def setUp(self):
         self.client.force_authenticate(self.user)
-        patcher = patch("todo.views.publish", new_callable=AsyncMock)
+        patcher = patch("todo.services.publish", new_callable=AsyncMock)
         self.publish = patcher.start()
         self.addCleanup(patcher.stop)
 
@@ -519,7 +519,24 @@ class TaskEventTests(TaskAPITestCase):
         self.assertEqual(event.type, TadkEventType.CREATED_EVENT)
         self.assertEqual(event.subject, f"tasks/{pk}")
         self.assertEqual(event.data.task_id, pk)
+        self.assertEqual(event.data.user_id, self.user.pk)
         self.assertEqual(event.data.tg_id, 777)
+        self.assertEqual(event.data.changed_via, ChangedVia.WEB)
+
+    def test_create_event_contains_full_task(self):
+        self.client.post(
+            TASKS_URL,
+            self.task_payload(
+                body="Milk", priority=Task.Priority.HIGH, category="home"
+            ),
+        )
+
+        event, _ = self.published()
+        self.assertEqual(event.data.title, "New task")
+        self.assertEqual(event.data.body, "Milk")
+        self.assertFalse(event.data.completed)
+        self.assertEqual(event.data.priority, Task.Priority.HIGH)
+        self.assertEqual(event.data.category, "home")
 
     def test_update_publishes_event(self):
         task = self.make_task(priority=Task.Priority.LOW)
@@ -553,6 +570,7 @@ class TaskEventTests(TaskAPITestCase):
         self.assertEqual(event.type, TadkEventType.DELETED_EVENT)
         self.assertEqual(event.subject, f"tasks/{pk}")
         self.assertEqual(event.data.task_id, pk)
+        self.assertEqual(event.data.user_id, self.user.pk)
         self.assertEqual(event.data.title, "Removed")
 
     def test_complete_publishes_update_event(self):
@@ -578,7 +596,7 @@ class TaskEventTests(TaskAPITestCase):
         event, _ = self.published()
         self.assertIsInstance(event.to_bytes(), bytes)
 
-    def test_nothing_is_published_without_tg_id(self):
+    def test_events_are_published_without_tg_id(self):
         self.profile.tg_id = None
         self.profile.save()
 
@@ -586,14 +604,16 @@ class TaskEventTests(TaskAPITestCase):
         self.client.patch(task_url(pk), {"completed": True})
         self.client.delete(task_url(pk))
 
-        self.publish.assert_not_awaited()
+        self.assertEqual(self.publish.await_count, 3)
+        for call in self.publish.await_args_list:
+            self.assertIsNone(call.kwargs["event"].data.tg_id)
 
     def test_invalid_request_publishes_nothing(self):
         self.client.post(TASKS_URL, {})
 
         self.publish.assert_not_awaited()
 
-    def test_nothing_is_published_for_telegram_client(self):
+    def test_telegram_client_events_are_marked(self):
         pk = self.client.post(
             TASKS_URL, self.task_payload(), HTTP_X_CLIENT="Telegram"
         ).data["pk"]
@@ -601,9 +621,12 @@ class TaskEventTests(TaskAPITestCase):
         self.client.delete(task_url(pk), HTTP_X_CLIENT="Telegram")
 
         self.assertFalse(Task.objects.filter(pk=pk).exists())
-        self.publish.assert_not_awaited()
+        self.assertEqual(self.publish.await_count, 3)
+        for call in self.publish.await_args_list:
+            self.assertEqual(call.kwargs["event"].data.changed_via, ChangedVia.TELEGRAM)
 
-    def test_other_client_header_still_publishes(self):
+    def test_other_client_header_is_marked_as_web(self):
         self.client.post(TASKS_URL, self.task_payload(), HTTP_X_CLIENT="Web")
 
-        self.publish.assert_awaited_once()
+        event, _ = self.published()
+        self.assertEqual(event.data.changed_via, ChangedVia.WEB)
