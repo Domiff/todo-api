@@ -12,8 +12,8 @@ with categories, deadlines, and completion status.
 - **Search**: full-text search over the user's tasks (title and body) with PostgreSQL `tsvector` and a GIN index.
 - **Auth**: Simple JWT (access/refresh, blacklist on rotation); one registration endpoint for the web app and the Telegram bot.
 - **API docs**: OpenAPI schema and **Swagger UI** (drf-spectacular).
-- **Task events**: creating, updating or deleting a task publishes an event to RabbitMQ; the
-  [todo-bot](https://github.com/Domiff/todo-bot) service consumes it and notifies the owner in Telegram.
+- **Task events**: every create, update or delete publishes an event with the full task to RabbitMQ;
+  [todo-bot](https://github.com/Domiff/todo-bot) notifies the owner in Telegram, and todo-ai indexes the task for AI search.
 
 ## Tech stack
 
@@ -50,9 +50,10 @@ with categories, deadlines, and completion status.
 │   │   ├── events.py                 # task event types and payloads (contract with consumers)
 │   │   ├── producers.py              # publish(), routing keys
 │   │   ├── serializers.py
+│   │   ├── services.py               # TaskService: create/update/complete/delete + event publishing
 │   │   ├── models.py
 │   │   ├── urls.py                   # router: tasks/, categories/; search/
-│   │   └── views.py                  # TaskViewSet, CategoryViewSet, SearchView
+│   │   └── views.py                  # TaskViewSet (HTTP only), CategoryViewSet, SearchView
 │   └── auth_user/                    # Registration & JWT-facing views
 │       ├── migrations/
 │       ├── admin.py
@@ -228,16 +229,31 @@ The API publishes domain events to RabbitMQ so other services can react without 
   first publish, so the backend starts even if the broker is down, but publishing then fails.
 - **Exchange**: `todo.tasks` (topic, durable). The exchange, queues and bindings are declared by
   todo-infrastructure (`definitions.json`); this service only publishes.
-- **Events** (published only for users with a Telegram profile, and not for requests with `X-Client: Telegram`):
+- **Events** are published for every change, whoever made it. Each consumer decides itself what to
+  do with an event (todo-bot, for example, skips users without Telegram and changes made in the bot):
 
-  | Routing key     | Event type             | Published when                  | `data`                                                                 |
-  |-----------------|------------------------|---------------------------------|------------------------------------------------------------------------|
-  | `tasks.created` | `todo.task.created.v1` | a task is created               | `task_id`, `tg_id`, `title`, `deadline`                                |
-  | `tasks.updated` | `todo.task.updated.v1` | a task is updated (PUT / PATCH) or its status changes (`complete` / `in-progress`) | `task_id`, `tg_id`, `title`, `body`, `completed`, `deadline`, `priority`, `category` |
-  | `tasks.deleted` | `todo.task.deleted.v1` | a task is deleted               | `task_id`, `tg_id`, `title`                                            |
+  | Routing key     | Event type             | Published when                                                                      |
+  |-----------------|------------------------|-------------------------------------------------------------------------------------|
+  | `tasks.created` | `todo.task.created.v1` | a task is created                                                                   |
+  | `tasks.updated` | `todo.task.updated.v1` | a task is updated (PUT / PATCH) or its status changes (`complete` / `in-progress`) |
+  | `tasks.deleted` | `todo.task.deleted.v1` | a task is deleted (`data` holds the task as it was before deletion)                 |
 
-  `category` is the category's slug (an empty string if the task has none); `priority` is 1 (low), 2 (middle) or 3 (high); `completed` is a boolean. Event types live in
-  `todo/events.py`, routing keys in `todo/producers.py` (`TaskRoutingKey`).
+  All three events carry the same `data` (`TaskData`):
+
+  | Field         | Type             | Description                                                                 |
+  |---------------|------------------|-----------------------------------------------------------------------------|
+  | `task_id`     | int              | task id                                                                     |
+  | `user_id`     | int              | owner's user id                                                             |
+  | `tg_id`       | int or `null`    | owner's Telegram id; `null` if Telegram is not linked                       |
+  | `changed_via` | string           | `telegram` for requests with `X-Client: Telegram`, otherwise `web`          |
+  | `title`, `body` | string         | task text                                                                   |
+  | `completed`   | bool             | completion status                                                           |
+  | `deadline`    | ISO 8601 datetime | deadline                                                                   |
+  | `priority`    | int              | 1 (low), 2 (middle) or 3 (high)                                             |
+  | `category`    | string           | category slug, an empty string if the task has none                         |
+
+  The payload lives in `todo/events.py`, routing keys in `todo/producers.py` (`TaskRoutingKey`),
+  publishing in `todo/services.py` (`TaskService`).
 
 - **Format**: [CloudEvents 1.0](https://cloudevents.io/) JSON, persistent delivery:
 
@@ -252,16 +268,22 @@ The API publishes domain events to RabbitMQ so other services can react without 
     "datacontenttype": "application/json",
     "data": {
       "task_id": 42,
+      "user_id": 7,
       "tg_id": 1165414400,
+      "changed_via": "web",
       "title": "Buy milk",
-      "deadline": "2026-10-28T18:00:00+00:00"
+      "body": "and bread",
+      "completed": false,
+      "deadline": "2026-10-28T18:00:00+00:00",
+      "priority": 2,
+      "category": "shopping"
     }
   }
   ```
 
-The event type and payload are a contract with consumers: todo-bot keeps its own copy of the
-payload models with all fields required. Messages already waiting in the queue keep the format
-they were published with. Breaking changes are meant to get a new event version (`...v2`).
+The event type and payload are a contract with consumers: todo-bot and todo-ai keep their own
+copy of the payload model. Messages already waiting in the queue keep the format they were
+published with. Breaking changes are meant to get a new event version (`...v2`).
 
 ## API overview
 
