@@ -5,9 +5,8 @@ WORKDIR /backend
 
 COPY pyproject.toml ./
 
-ENV UV_PROJECT_ENVIRONMENT=/usr/local
-
-ENV UV_SYSTEM_PYTHON=1
+ENV UV_PROJECT_ENVIRONMENT=/usr/local \
+    UV_SYSTEM_PYTHON=1
 
 RUN uv sync --no-dev
 
